@@ -1,0 +1,36 @@
+{
+  "name": "NexaMesh",
+  "code": "nexa_mesh",
+  "version": "0.1.0",
+  "description": "NoBrand / ForwardX orchestration extension for Xboard",
+  "author": "ludehonghaha",
+  "require": {
+    "xboard": ">=1.0.0"
+  },
+  "config": {
+    "enable_nobrand": {
+      "type": "boolean",
+      "default": true,
+      "label": "Enable NoBrand extensions",
+      "description": "Expose NoBrand-specific orchestration capabilities."
+    },
+    "enable_dual": {
+      "type": "boolean",
+      "default": true,
+      "label": "Enable Dual orchestration",
+      "description": "Enable Dual path orchestration APIs and UI integration."
+    },
+    "forwardx_api_base": {
+      "type": "string",
+      "default": "",
+      "label": "ForwardX API Base URL",
+      "description": "Base URL for the ForwardX orchestration service."
+    },
+    "forwardx_api_token": {
+      "type": "string",
+      "default": "",
+      "label": "ForwardX API Token",
+      "description": "Bearer token used server-side when calling ForwardX. Never expose this value to clients."
+    }
+  }
+}
