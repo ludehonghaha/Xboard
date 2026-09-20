@@ -118,3 +118,25 @@ Removed from the Lite admin API and UI:
 Legacy database columns are retained for migration compatibility, but the Lite user-management API neither exposes nor edits them.
 
 User filtering and sorting use a Lite allow-list so removed financial/referral fields cannot be queried through the admin user API.
+
+
+## Standalone NoBrand machines
+
+NoBrand-OneClick is integrated only as an **independent machine type**.
+
+The two machine types are intentionally separate:
+
+- `xboard-node`: normal Xboard machine mode; Xboard nodes may be bound to it.
+- `nobrand-oneclick`: standalone ike NoBrand machine; Xboard protocol nodes cannot be bound to it.
+
+Creating a NoBrand machine in the Lite admin produces a checksum-pinned one-click bootstrap command for:
+
+- upstream: `ike-sh/NoBrand-OneClick`
+- release: `v3.2.2`
+- installer SHA-256: `37ba6fb4f35c7e032d05021782a090040af09337c5e95a42cbc0f8f0cf7d66c0`
+
+The command installs the NoBrand manager only. It does **not** install Xboard-Node, a companion agent, per-user bindings, traffic accounting, or Xboard-managed NoBrand protocol runtimes.
+
+After bootstrap, protocol lifecycle remains entirely inside the upstream `nobrand` CLI. Xboard only keeps the independent machine record and can regenerate the installation command.
+
+The Lite backend rejects any attempt to bind a normal Xboard protocol node to a `nobrand-oneclick` machine.
