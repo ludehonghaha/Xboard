@@ -53,3 +53,9 @@ jobs:
         run: |
           set -euo pipefail
           php tests/Smoke/NoBrandTrafficWatermarkSmoke.php
+
+      - name: Smoke NoBrand agent parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/Smoke/NoBrandAgentSmoke.py
