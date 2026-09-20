@@ -37,12 +37,34 @@ class ServerService
     }
 
     /**
-     * 获取机器下所有已启用节点
+     * Nodes managed by the native Xboard-Node runtime.
+     *
+     * NoBrand-managed nodes are intentionally excluded to prevent two
+     * runtimes from attempting to own the same listener.
      */
     public static function getMachineNodes(ServerMachine $machine): Collection
     {
+        return self::getMachineNodesByRuntime($machine, 'native');
+    }
+
+    public static function getNoBrandMachineNodes(ServerMachine $machine): Collection
+    {
+        return self::getMachineNodesByRuntime($machine, 'nobrand');
+    }
+
+    public static function getMachineNodesByRuntime(ServerMachine $machine, string $runtimeDriver): Collection
+    {
         return Server::where('machine_id', $machine->id)
             ->where('enabled', true)
+            ->where(function ($query) use ($runtimeDriver) {
+                if ($runtimeDriver === 'native') {
+                    $query->whereNull('runtime_driver')
+                        ->orWhere('runtime_driver', 'native');
+                    return;
+                }
+
+                $query->where('runtime_driver', $runtimeDriver);
+            })
             ->orderBy('sort', 'ASC')
             ->get();
     }
