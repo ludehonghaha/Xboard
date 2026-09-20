@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\NoBrandUserBinding;
 use App\Models\Server;
 use App\Models\ServerMachine;
 use App\Models\ServerRoute;
@@ -38,34 +37,12 @@ class ServerService
     }
 
     /**
-     * Nodes managed by the native Xboard-Node runtime.
-     *
-     * NoBrand-managed nodes are intentionally excluded to prevent two
-     * runtimes from attempting to own the same listener.
+     * 获取机器下所有已启用节点
      */
     public static function getMachineNodes(ServerMachine $machine): Collection
     {
-        return self::getMachineNodesByRuntime($machine, 'native');
-    }
-
-    public static function getNoBrandMachineNodes(ServerMachine $machine): Collection
-    {
-        return self::getMachineNodesByRuntime($machine, 'nobrand');
-    }
-
-    public static function getMachineNodesByRuntime(ServerMachine $machine, string $runtimeDriver): Collection
-    {
         return Server::where('machine_id', $machine->id)
             ->where('enabled', true)
-            ->where(function ($query) use ($runtimeDriver) {
-                if ($runtimeDriver === 'native') {
-                    $query->whereNull('runtime_driver')
-                        ->orWhere('runtime_driver', 'native');
-                    return;
-                }
-
-                $query->where('runtime_driver', $runtimeDriver);
-            })
             ->orderBy('sort', 'ASC')
             ->get();
     }
@@ -88,125 +65,19 @@ class ServerService
             ->get()
             ->append(['last_check_at', 'last_push_at', 'online', 'is_online', 'available_status', 'cache_key', 'server_key']);
 
-        $noBrandDedicatedIds = $servers
-            ->filter(fn (Server $server) =>
-                $server->runtime_driver === 'nobrand'
-                && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC], true)
-            )
-            ->pluck('id')
-            ->all();
-
-        $bindings = empty($noBrandDedicatedIds)
-            ? collect()
-            : NoBrandUserBinding::query()
-                ->where('user_id', $user->id)
-                ->whereIn('server_id', $noBrandDedicatedIds)
-                ->where('enabled', true)
-                ->get()
-                ->keyBy('server_id');
-
-        $servers = $servers
-            ->filter(function (Server $server) use ($bindings) {
-                if (
-                    $server->runtime_driver !== 'nobrand'
-                    || !in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC], true)
-                ) {
-                    return true;
-                }
-
-                // Dedicated NoBrand runtimes must not leak the logical node's
-                // generic port before the companion reports the real per-user
-                // endpoint.
-                return $bindings->has($server->id);
-            })
-            ->map(function (Server $server) use ($user, $bindings) {
-                if (
-                    $server->runtime_driver === 'nobrand'
-                    && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC], true)
-                ) {
-                    /** @var NoBrandUserBinding $binding */
-                    $binding = $bindings->get($server->id);
-
-                    $server->host = $binding->display_host ?: $server->host;
-                    $server->port = (int) $binding->display_port;
-                    $server->password = $user->uuid;
-                    $server->runtime_binding = [
-                        'instance_id' => $binding->instance_id,
-                        'transport' => $binding->transport,
-                        'last_synced_at' => $binding->last_synced_at,
-                    ];
-
-                    if ($server->type === Server::TYPE_MIERU) {
-                        $server->username = $binding->remote_user;
-                    } elseif ($server->type === Server::TYPE_SNELL) {
-                        $server->runtime_binding['instance_name'] = $binding->remote_user;
-                    } elseif ($server->type === Server::TYPE_HYSTERIA) {
-                        $meta = is_array($binding->runtime_meta) ? $binding->runtime_meta : [];
-                        $settings = is_array($server->protocol_settings) ? $server->protocol_settings : [];
-                        $settings['version'] = 2;
-                        $settings['tls'] = array_merge(
-                            is_array($settings['tls'] ?? null) ? $settings['tls'] : [],
-                            [
-                                'server_name' => (string) ($meta['sni'] ?? ''),
-                                'allow_insecure' => true,
-                            ]
-                        );
-                        $settings['obfs'] = [
-                            'open' => true,
-                            'type' => 'salamander',
-                            'password' => (string) ($meta['obfs'] ?? ''),
-                        ];
-                        $server->protocol_settings = $settings;
-                        $server->runtime_binding['client_name'] = $binding->remote_user;
-                    } elseif ($server->type === Server::TYPE_TUIC) {
-                        $meta = is_array($binding->runtime_meta) ? $binding->runtime_meta : [];
-                        $credentials = is_array($binding->credential_payload)
-                            ? $binding->credential_payload
-                            : [];
-
-                        $uuid = (string) ($credentials['uuid'] ?? '');
-                        $password = (string) ($credentials['password'] ?? '');
-                        if ($uuid === '' || $password === '') {
-                            return null;
-                        }
-
-                        $settings = is_array($server->protocol_settings) ? $server->protocol_settings : [];
-                        $settings['version'] = 5;
-                        $settings['congestion_control'] = (string) ($meta['congestion_control'] ?? 'cubic');
-                        $settings['udp_relay_mode'] = (string) ($meta['udp_relay_mode'] ?? 'native');
-                        $settings['alpn'] = is_array($meta['alpn'] ?? null) ? $meta['alpn'] : ['h3'];
-                        $settings['tls'] = array_merge(
-                            is_array($settings['tls'] ?? null) ? $settings['tls'] : [],
-                            [
-                                'server_name' => (string) ($meta['sni'] ?? ''),
-                                'allow_insecure' => true,
-                            ]
-                        );
-                        $server->protocol_settings = $settings;
-                        $server->password = $password;
-                        $server->runtime_binding['uuid'] = $uuid;
-                        $server->runtime_binding['password'] = $password;
-                        $server->runtime_binding['user_name'] = $binding->remote_user;
-                        $server->runtime_binding['zero_rtt_handshake'] = (bool) ($meta['zero_rtt_handshake'] ?? false);
-                    }
-                } else {
-                    // 判断动态端口
-                    if (str_contains((string) $server->port, '-')) {
-                        $port = $server->port;
-                        $server->port = (int) Helper::randomPort($port);
-                        $server->ports = $port;
-                    } else {
-                        $server->port = (int) $server->port;
-                    }
-                    $server->password = $server->generateServerPassword($user);
-                }
-
-                $server->rate = $server->getCurrentRate();
-                return $server;
-            })
-            ->filter()
-            ->values()
-            ->toArray();
+        $servers = collect($servers)->map(function ($server) use ($user) {
+            // 判断动态端口
+            if (str_contains($server->port, '-')) {
+                $port = $server->port;
+                $server->port = (int) Helper::randomPort($port);
+                $server->ports = $port;
+            } else {
+                $server->port = (int) $server->port;
+            }
+            $server->password = $server->generateServerPassword($user);
+            $server->rate = $server->getCurrentRate();
+            return $server;
+        })->toArray();
 
         return $servers;
     }
