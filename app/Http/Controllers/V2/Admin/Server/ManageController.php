@@ -99,6 +99,16 @@ class ManageController extends Controller
             if ((int) data_get($protocolSettings, 'version', 2) !== 2) {
                 return [422, 'NoBrand Hysteria Runtime 仅支持 Hysteria2'];
             }
+
+            $sni = trim((string) data_get($protocolSettings, 'tls.server_name', ''));
+            if ($sni === '' || mb_strlen($sni) > 255) {
+                return [422, 'NoBrand Hysteria2 必须配置有效 SNI'];
+            }
+
+            $port = (int) ($params['server_port'] ?? $existing?->server_port ?? 0);
+            if ($port < 1 || $port > 65535) {
+                return [422, 'NoBrand Hysteria2 必须配置 UDP server_port'];
+            }
         }
 
         if (!$machineId) {
@@ -192,6 +202,99 @@ class ManageController extends Controller
         } catch (\Exception $e) {
             Log::error($e);
             return $this->fail([500, '创建失败']);
+        }
+    }
+
+    public function createNoBrandHy2(Request $request)
+    {
+        $params = $request->validate([
+            'name' => 'required|string|max:64',
+            'host' => 'required|string|max:255',
+            'server_port' => 'required|integer|min:1|max:65535',
+            'sni' => 'required|string|max:255',
+            'machine_id' => 'required|integer',
+            'group_ids' => 'required|array|min:1',
+            'group_ids.*' => 'integer',
+            'ingress_profile' => 'nullable|string|max:128',
+            'rate' => 'nullable|numeric|min:0',
+        ]);
+
+        $groupIds = collect($params['group_ids'])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if (
+            $groupIds->isEmpty()
+            || ServerGroup::query()->whereIn('id', $groupIds)->count() !== $groupIds->count()
+        ) {
+            return $this->fail([422, '权限组无效']);
+        }
+
+        $runtimeSettings = array_filter([
+            'advertise_host' => trim((string) $params['host']),
+            'ingress_profile' => trim((string) ($params['ingress_profile'] ?? '')),
+        ], fn ($value) => $value !== '');
+
+        $protocolSettings = [
+            'version' => 2,
+            'bandwidth' => ['up' => null, 'down' => null],
+            'obfs' => [
+                'open' => true,
+                'type' => 'salamander',
+                'password' => null,
+            ],
+            'tls' => [
+                'server_name' => trim((string) $params['sni']),
+                'allow_insecure' => true,
+            ],
+            'hop_interval' => null,
+        ];
+
+        $candidate = [
+            'type' => Server::TYPE_HYSTERIA,
+            'machine_id' => (int) $params['machine_id'],
+            'server_port' => (int) $params['server_port'],
+            'runtime_driver' => 'nobrand',
+            'runtime_driver_settings' => $runtimeSettings,
+            'protocol_settings' => $protocolSettings,
+        ];
+
+        if ($error = $this->validateRuntimeDriverBinding($candidate)) {
+            return $this->fail($error);
+        }
+
+        try {
+            $server = Server::create([
+                'type' => Server::TYPE_HYSTERIA,
+                'name' => trim($params['name']),
+                'host' => trim($params['host']),
+                'port' => 1,
+                'server_port' => (int) $params['server_port'],
+                'group_ids' => $groupIds->map(fn ($id) => (string) $id)->all(),
+                'route_ids' => [],
+                'tags' => ['nobrand', 'hysteria2', 'multi-auth'],
+                'show' => true,
+                'enabled' => true,
+                'rate' => (float) ($params['rate'] ?? 1),
+                'sort' => ((int) Server::max('sort')) + 1,
+                'protocol_settings' => $protocolSettings,
+                'machine_id' => (int) $params['machine_id'],
+                'runtime_driver' => 'nobrand',
+                'runtime_driver_settings' => $runtimeSettings,
+                'transfer_enable' => 0,
+                'u' => 0,
+                'd' => 0,
+            ]);
+
+            return $this->success([
+                'id' => $server->id,
+                'name' => $server->name,
+                'type' => $server->type,
+            ]);
+        } catch (\Exception $e) {
+            Log::error($e);
+            return $this->fail([500, '创建 NoBrand Hysteria2 节点失败']);
         }
     }
 
