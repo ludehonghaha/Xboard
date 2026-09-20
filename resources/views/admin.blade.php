@@ -593,6 +593,59 @@
         };
       };
 
+      const ensureLiteNavigation = () => {
+        // Rename the old commerce-oriented plan label.
+        document.querySelectorAll('a,button,[role="menuitem"],span').forEach((node) => {
+          const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+          if (text === '套餐管理') {
+            const leaf = Array.from(node.querySelectorAll('span')).find((span) => (span.textContent || '').trim() === '套餐管理');
+            if (leaf) leaf.textContent = '服务套餐';
+            else if (node.children.length === 0) node.textContent = '服务套餐';
+          } else if (text === 'Plan Management') {
+            const leaf = Array.from(node.querySelectorAll('span')).find((span) => (span.textContent || '').trim() === 'Plan Management');
+            if (leaf) leaf.textContent = 'Service Plans';
+            else if (node.children.length === 0) node.textContent = 'Service Plans';
+          }
+        });
+
+        const fallback = document.getElementById('xboard-lite-invite-button');
+        const existing = document.getElementById('xboard-lite-invite-nav');
+        if (existing?.isConnected) {
+          if (fallback) fallback.style.display = 'none';
+          return;
+        }
+
+        const labels = new Set(['用户管理', 'User Management', 'Пользователи']);
+        const candidates = Array.from(document.querySelectorAll('a,button,[role="menuitem"]'));
+        const source = candidates.find((node) => labels.has((node.textContent || '').replace(/\s+/g, ' ').trim()));
+
+        if (!source || !source.parentElement || !fallback) {
+          if (fallback) fallback.style.display = '';
+          return;
+        }
+
+        const nav = source.cloneNode(true);
+        nav.id = 'xboard-lite-invite-nav';
+        nav.removeAttribute('href');
+        nav.removeAttribute('aria-current');
+        nav.removeAttribute('data-state');
+        nav.querySelectorAll('[aria-current]').forEach((node) => node.removeAttribute('aria-current'));
+
+        const spans = Array.from(nav.querySelectorAll('span'));
+        const textSpan = spans.find((span) => labels.has((span.textContent || '').replace(/\s+/g, ' ').trim()));
+        if (textSpan) textSpan.textContent = '邀请码管理';
+        else nav.textContent = '邀请码管理';
+
+        nav.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          fallback.click();
+        });
+
+        source.parentElement.insertBefore(nav, source.nextSibling);
+        fallback.style.display = 'none';
+      };
+
       let scheduled = false;
       const clean = () => {
         if (scheduled) return;
@@ -604,6 +657,7 @@
           hideRemovedFields();
           hideRemovedColumns();
           ensureAccessInviteButton();
+          ensureLiteNavigation();
           ensureLiteDashboard();
         });
       };
