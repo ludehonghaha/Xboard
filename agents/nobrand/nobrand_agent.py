@@ -392,13 +392,21 @@ def load_hy2_owner() -> dict[str, Any] | None:
     return owner
 
 
-def save_hy2_owner(node_id: int) -> None:
+def save_hy2_owner(node_id: int, node: dict[str, Any]) -> None:
     save_root_json(HY2_OWNER_FILE, {
         "version": 1,
         "node_id": int(node_id),
         "managed_by": "xboard-nobrand-agent",
+        "node_spec": hy2_node_parameters(node),
         "updated_at": int(time.time()),
     })
+
+
+def hy2_owner_matches_node(owner: dict[str, Any], node: dict[str, Any]) -> bool:
+    spec = owner.get("node_spec")
+    if not isinstance(spec, dict):
+        return False
+    return spec == hy2_node_parameters(node)
 
 
 def clear_hy2_owner() -> None:
@@ -454,10 +462,6 @@ def hy2_state_matches_node(node: dict[str, Any], state: dict[str, Any]) -> bool:
         return False
     if int(state.get("advertise_port") or 0) != wanted["port"]:
         return False
-
-    if wanted["ingress_profile"]:
-        if str(state.get("ingress_profile_id") or "") != wanted["ingress_profile"]:
-            return False
 
     return True
 
@@ -601,7 +605,12 @@ def reconcile_hy2_node(node: dict[str, Any] | None) -> list[dict[str, Any]]:
             installed_here = True
             state = load_json_object(NOBRAND_HY2_STATE_FILE, "NoBrand HY2 state")
             config = load_json_object(NOBRAND_HY2_CONFIG_FILE, "NoBrand HY2 config")
-        elif state is None or config is None or not hy2_state_matches_node(node, state):
+        elif (
+            state is None
+            or config is None
+            or not hy2_state_matches_node(node, state)
+            or not hy2_owner_matches_node(owner, node)
+        ):
             install_hy2_runtime(node)
             state = load_json_object(NOBRAND_HY2_STATE_FILE, "NoBrand HY2 state")
             config = load_json_object(NOBRAND_HY2_CONFIG_FILE, "NoBrand HY2 config")
@@ -610,7 +619,7 @@ def reconcile_hy2_node(node: dict[str, Any] | None) -> list[dict[str, Any]]:
             raise RuntimeError("NoBrand HY2 install completed without state/config")
 
         apply_hy2_multiclient_overlay(users)
-        save_hy2_owner(node_id)
+        save_hy2_owner(node_id, node)
 
     except Exception:
         if installed_here:
