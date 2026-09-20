@@ -19,3 +19,11 @@ jobs:
           set -euo pipefail
           find app routes config database plugins-core tests -type f -name '*.php' -print0 \
             | xargs -0 -n1 php -l
+
+      - name: Lint NoBrand companion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile agents/nobrand/nobrand_agent.py
+          bash -n agents/nobrand/install.sh
+          python3 agents/nobrand/nobrand_agent.py --version
