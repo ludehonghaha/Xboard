@@ -54,6 +54,7 @@ class MachineController extends Controller
             'is_active' => 'nullable|boolean',
             'agent_driver' => 'nullable|string|in:xboard-node,nobrand-hybrid',
             'agent_settings' => 'nullable|array',
+            'agent_settings.snell_meter' => 'nullable|string|in:off,nft',
         ]);
 
         if (!empty($params['id'])) {
