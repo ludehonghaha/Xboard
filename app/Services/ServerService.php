@@ -91,7 +91,7 @@ class ServerService
         $noBrandDedicatedIds = $servers
             ->filter(fn (Server $server) =>
                 $server->runtime_driver === 'nobrand'
-                && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)
+                && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC], true)
             )
             ->pluck('id')
             ->all();
@@ -109,7 +109,7 @@ class ServerService
             ->filter(function (Server $server) use ($bindings) {
                 if (
                     $server->runtime_driver !== 'nobrand'
-                    || !in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)
+                    || !in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC], true)
                 ) {
                     return true;
                 }
@@ -122,7 +122,7 @@ class ServerService
             ->map(function (Server $server) use ($user, $bindings) {
                 if (
                     $server->runtime_driver === 'nobrand'
-                    && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)
+                    && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC], true)
                 ) {
                     /** @var NoBrandUserBinding $binding */
                     $binding = $bindings->get($server->id);
@@ -158,6 +158,35 @@ class ServerService
                         ];
                         $server->protocol_settings = $settings;
                         $server->runtime_binding['client_name'] = $binding->remote_user;
+                    } elseif ($server->type === Server::TYPE_TUIC) {
+                        $meta = is_array($binding->runtime_meta) ? $binding->runtime_meta : [];
+                        $credentials = is_array($binding->credential_payload)
+                            ? $binding->credential_payload
+                            : [];
+
+                        $uuid = (string) ($credentials['uuid'] ?? '');
+                        $password = (string) ($credentials['password'] ?? '');
+                        if ($uuid === '' || $password === '') {
+                            return null;
+                        }
+
+                        $settings = is_array($server->protocol_settings) ? $server->protocol_settings : [];
+                        $settings['version'] = 5;
+                        $settings['congestion_control'] = (string) ($meta['congestion_control'] ?? 'cubic');
+                        $settings['udp_relay_mode'] = (string) ($meta['udp_relay_mode'] ?? 'native');
+                        $settings['alpn'] = is_array($meta['alpn'] ?? null) ? $meta['alpn'] : ['h3'];
+                        $settings['tls'] = array_merge(
+                            is_array($settings['tls'] ?? null) ? $settings['tls'] : [],
+                            [
+                                'server_name' => (string) ($meta['sni'] ?? ''),
+                                'allow_insecure' => true,
+                            ]
+                        );
+                        $server->protocol_settings = $settings;
+                        $server->password = $password;
+                        $server->runtime_binding['uuid'] = $uuid;
+                        $server->runtime_binding['password'] = $password;
+                        $server->runtime_binding['user_name'] = $binding->remote_user;
                     }
                 } else {
                     // 判断动态端口
@@ -174,6 +203,8 @@ class ServerService
                 $server->rate = $server->getCurrentRate();
                 return $server;
             })
+            ->filter()
+            ->values()
             ->toArray();
 
         return $servers;
