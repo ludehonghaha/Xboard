@@ -29,7 +29,6 @@ class RegisterServiceTest extends TestCase
             'stop_register' => 0,
             'captcha_enable' => 0,
             'register_limit_by_ip_enable' => 0,
-            'try_out_plan_id' => 0,
         ]);
 
         $this->issuer = User::query()->create([
@@ -74,6 +73,8 @@ class RegisterServiceTest extends TestCase
         $this->assertTrue($success);
         $this->assertInstanceOf(User::class, $user);
         $this->assertNull($user->invite_user_id);
+        $this->assertNull($user->plan_id);
+        $this->assertNull($user->group_id);
 
         $invite->refresh();
         $this->assertTrue((bool) $invite->status);
