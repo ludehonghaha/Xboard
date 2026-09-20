@@ -32,6 +32,7 @@ class ServerRoute
             $route->post('nodes', [MachineController::class, 'nodes']);
             $route->post('nobrand-nodes', [MachineController::class, 'nobrandNodes']);
             $route->post('nobrand-bindings', [MachineController::class, 'nobrandBindings']);
+            $route->post('nobrand-status', [MachineController::class, 'nobrandStatus']);
             $route->post('status', [MachineController::class, 'status']);
         });
     }
