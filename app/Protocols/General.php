@@ -371,6 +371,13 @@ class General extends AbstractProtocol
 
     public static function buildTuic($password, $server)
     {
+        // NoBrand TUIC v5 deliberately follows the upstream exporter: there
+        // is no verified standardized v5 URI, so generic URI subscriptions
+        // omit these nodes instead of manufacturing an incompatible link.
+        if (data_get($server, 'runtime_driver') === 'nobrand') {
+            return '';
+        }
+
         $protocol_settings = data_get($server, 'protocol_settings', []);
         $name = rawurlencode($server['name']);
         $addr = Helper::wrapIPv6($server['host']);
