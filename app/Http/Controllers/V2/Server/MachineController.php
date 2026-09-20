@@ -3,12 +3,16 @@
 namespace App\Http\Controllers\V2\Server;
 
 use App\Http\Controllers\Controller;
+use App\Models\NoBrandUserBinding;
+use App\Models\Server;
 use App\Models\ServerMachine;
+use App\Models\User;
 use App\Models\ServerMachineLoadHistory;
 use App\Services\ServerService;
 use App\Services\NoBrand\NoBrandDriver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * machine controller
@@ -53,7 +57,44 @@ class MachineController extends Controller
         }
 
         $nodes = ServerService::getNoBrandMachineNodes($machine)
-            ->map(function ($node) {
+            ->map(function (Server $node) {
+                $desiredUsers = [];
+
+                if ($node->type === Server::TYPE_MIERU) {
+                    $available = ServerService::getAvailableUsers($node);
+                    $userIds = $available->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+                    $details = empty($userIds)
+                        ? collect()
+                        : User::query()
+                            ->whereIn('id', $userIds)
+                            ->get(['id', 'uuid', 'speed_limit', 'expired_at'])
+                            ->keyBy('id');
+
+                    $desiredUsers = $available
+                        ->map(function ($user) use ($details) {
+                            $detail = $details->get((int) $user->id);
+                            $expiredAt = $detail?->expired_at;
+
+                            return [
+                                'user_id' => (int) $user->id,
+                                'remote_user' => 'xb' . (int) $user->id,
+                                // Companion uses the existing Xboard UUID as the
+                                // NoBrand password; it must never log this value.
+                                'password' => (string) $user->uuid,
+                                'bandwidth_mbps' => max(0, (int) ($detail?->speed_limit ?? 0)),
+                                'expire' => $expiredAt ? date('Y-m-d', (int) $expiredAt) : '0',
+                                // Quota remains panel-owned until NoBrand traffic
+                                // accounting is reported back to Xboard.
+                                'quota_mb' => 0,
+                                'quota_days' => 0,
+                                'enabled' => true,
+                            ];
+                        })
+                        ->values()
+                        ->all();
+                }
+
                 return [
                     'id' => $node->id,
                     'name' => $node->name,
@@ -63,6 +104,7 @@ class MachineController extends Controller
                     'server_port' => $node->server_port,
                     'protocol_settings' => $node->protocol_settings,
                     'runtime_driver_settings' => $node->runtime_driver_settings,
+                    'users' => $desiredUsers,
                     'updated_at' => $node->updated_at,
                 ];
             })
@@ -71,6 +113,97 @@ class MachineController extends Controller
         return response()->json([
             'driver' => NoBrandDriver::capabilities(),
             'nodes' => $nodes,
+        ]);
+    }
+
+    /**
+     * Report reconciled NoBrand per-user endpoints.
+     *
+     * Passwords are intentionally not accepted here. The panel remains the
+     * authority for user credentials; the companion may only report runtime
+     * identity and endpoint metadata.
+     */
+    public function nobrandBindings(Request $request): JsonResponse
+    {
+        $machine = $this->authenticateMachine($request);
+
+        if (($machine->agent_driver ?: 'xboard-node') !== NoBrandDriver::DRIVER) {
+            abort(409, 'Machine is not configured for NoBrand Hybrid');
+        }
+
+        $params = $request->validate([
+            'bindings' => 'required|array|max:5000',
+            'bindings.*.node_id' => 'required|integer',
+            'bindings.*.user_id' => 'required|integer',
+            'bindings.*.remote_user' => 'required|string|max:128',
+            'bindings.*.instance_id' => 'nullable|string|max:64',
+            'bindings.*.display_host' => 'nullable|string|max:255',
+            'bindings.*.display_port' => 'required|integer|min:1|max:65535',
+            'bindings.*.transport' => 'required|string|in:TCP,UDP,BOTH',
+            'bindings.*.enabled' => 'nullable|boolean',
+            'bindings.*.runtime_meta' => 'nullable|array',
+        ]);
+
+        $nodeIds = collect($params['bindings'])
+            ->pluck('node_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        $nodes = Server::query()
+            ->where('machine_id', $machine->id)
+            ->where('runtime_driver', 'nobrand')
+            ->where('type', Server::TYPE_MIERU)
+            ->whereIn('id', $nodeIds)
+            ->get()
+            ->keyBy('id');
+
+        if ($nodes->count() !== $nodeIds->count()) {
+            abort(422, 'Binding references a node not owned by this NoBrand Hybrid machine');
+        }
+
+        $userIds = collect($params['bindings'])
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        $existingUserIds = User::query()
+            ->whereIn('id', $userIds)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id);
+
+        if ($existingUserIds->count() !== $userIds->count()) {
+            abort(422, 'Binding references an unknown Xboard user');
+        }
+
+        $syncedAt = now()->timestamp;
+
+        DB::transaction(function () use ($params, $syncedAt) {
+            foreach ($params['bindings'] as $binding) {
+                NoBrandUserBinding::updateOrCreate(
+                    [
+                        'server_id' => (int) $binding['node_id'],
+                        'user_id' => (int) $binding['user_id'],
+                    ],
+                    [
+                        'remote_user' => $binding['remote_user'],
+                        'instance_id' => $binding['instance_id'] ?? null,
+                        'display_host' => $binding['display_host'] ?? null,
+                        'display_port' => (int) $binding['display_port'],
+                        'transport' => strtoupper($binding['transport']),
+                        'enabled' => (bool) ($binding['enabled'] ?? true),
+                        'runtime_meta' => $binding['runtime_meta'] ?? null,
+                        'last_synced_at' => $syncedAt,
+                    ]
+                );
+            }
+        });
+
+        return response()->json([
+            'data' => true,
+            'synced_at' => $syncedAt,
+            'count' => count($params['bindings']),
         ]);
     }
 
