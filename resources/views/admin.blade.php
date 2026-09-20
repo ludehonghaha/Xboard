@@ -804,6 +804,7 @@
               '<span class="xnb-badge">' + escapeHtml(nbState === 'ok' ? '对账 OK' : nbState === 'error' ? '对账 Error' : '未上报') + '</span>' +
               '<span class="xnb-muted">托管用户 ' + Number(nbStatus.managed_users || 0) +
               ' · Binding ' + Number(nbStatus.bindings || 0) +
+              ' · Traffic ' + Number(nbStatus.traffic_readings || 0) +
               ' · ' + Number(nbStatus.reconcile_ms || 0) + ' ms</span></div>';
 
             if (nbState === 'error' && nbStatus.message) {
@@ -861,9 +862,9 @@
 
             const cap = overlay.querySelector('#xnb-cap');
             cap.innerHTML =
-              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 2) + '</span>' +
+              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 3) + '</span>' +
               '<span class="xnb-badge">NoBrand ' + escapeHtml(capabilities.version || 'v3.2.2') + '</span>' +
-              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.2.0') + '</span>' +
+              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.3.0') + '</span>' +
               '<span class="xnb-muted">当前自动 Runtime：Mieru</span>';
 
             renderMachine();
