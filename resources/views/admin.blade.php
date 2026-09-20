@@ -646,6 +646,312 @@
         fallback.style.display = 'none';
       };
 
+
+      const noBrandAdminApi = async (path, options = {}) => {
+        const auth = findAdminAuth();
+        if (!auth) throw new Error('请先登录后台');
+        const url = '/api/v2/' + encodeURIComponent(window.settings.secure_path) + '/' + path;
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            'Authorization': auth,
+            'Accept': 'application/json',
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(options.headers || {})
+          }
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message = payload.message || payload.error || payload.data?.message || '请求失败';
+          throw new Error(typeof message === 'string' ? message : '请求失败');
+        }
+        return payload.data ?? payload;
+      };
+
+      const ensureNoBrandManager = () => {
+        if (!findAdminAuth() || document.getElementById('xboard-lite-nobrand-button')) return;
+
+        if (!document.getElementById('xboard-lite-nobrand-style')) {
+          const style = document.createElement('style');
+          style.id = 'xboard-lite-nobrand-style';
+          style.textContent =
+            '#xboard-lite-nobrand-button{position:fixed;right:22px;bottom:72px;z-index:9997;border:1px solid #374151;border-radius:10px;padding:10px 14px;cursor:pointer;background:#0f172a;color:#e5e7eb;box-shadow:0 8px 24px rgba(0,0,0,.2)}' +
+            '#xboard-lite-nobrand-overlay{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.68)}' +
+            '#xboard-lite-nobrand-panel{width:min(1040px,97vw);max-height:90vh;overflow:auto;border:1px solid #273449;border-radius:16px;padding:20px;background:#0b1220;color:#e5e7eb;box-shadow:0 28px 80px rgba(0,0,0,.5)}' +
+            '.xnb-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.xnb-head h2{margin:0;font-size:22px}.xnb-muted{color:#94a3b8;font-size:12px}' +
+            '.xnb-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.xnb-card{border:1px solid #243047;border-radius:12px;padding:15px;background:#0f172a}' +
+            '.xnb-card h3{margin:0 0 12px;font-size:15px}.xnb-row{display:grid;grid-template-columns:145px minmax(0,1fr);gap:10px;align-items:center;margin:9px 0}' +
+            '.xnb-row label{font-size:12px;color:#cbd5e1}.xnb-input,.xnb-select,.xnb-textarea{width:100%;box-sizing:border-box;border:1px solid #334155;border-radius:8px;background:#020617;color:#e5e7eb;padding:8px 10px;font:inherit}' +
+            '.xnb-textarea{min-height:94px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}' +
+            '.xnb-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.xnb-btn{border:1px solid #334155;border-radius:8px;padding:8px 11px;background:#1e293b;color:#f8fafc;cursor:pointer}.xnb-btn-primary{background:#1d4ed8;border-color:#2563eb}.xnb-btn-warn{background:#7c2d12;border-color:#9a3412}' +
+            '.xnb-status{min-height:20px;margin-top:10px;font-size:12px;color:#94a3b8}.xnb-ok{color:#86efac}.xnb-error{color:#fca5a5}.xnb-badge{display:inline-block;border:1px solid #334155;border-radius:999px;padding:3px 8px;font-size:11px;color:#cbd5e1;margin-right:5px}' +
+            '.xnb-check{display:flex;align-items:center;gap:8px}.xnb-check input{width:16px;height:16px}.xnb-command{margin-top:12px;padding-top:12px;border-top:1px solid #243047}' +
+            '@media(max-width:820px){.xnb-grid{grid-template-columns:1fr}.xnb-row{grid-template-columns:1fr}.xnb-head{flex-direction:column}}';
+          document.head.appendChild(style);
+        }
+
+        const button = document.createElement('button');
+        button.id = 'xboard-lite-nobrand-button';
+        button.type = 'button';
+        button.textContent = 'NoBrand Agent';
+
+        const overlay = document.createElement('div');
+        overlay.id = 'xboard-lite-nobrand-overlay';
+        overlay.innerHTML =
+          '<div id="xboard-lite-nobrand-panel">' +
+            '<div class="xnb-head"><div><h2>NoBrand Hybrid Agent</h2><div class="xnb-muted">Xboard-Node 与 NoBrand Mieru 专属实例并行管理</div></div><button type="button" class="xnb-btn" id="xnb-close">关闭</button></div>' +
+            '<div id="xnb-cap" class="xnb-muted" style="margin-bottom:12px">正在读取能力…</div>' +
+            '<div class="xnb-grid">' +
+              '<section class="xnb-card">' +
+                '<h3>机器 Agent</h3>' +
+                '<div class="xnb-row"><label>服务器机器</label><select id="xnb-machine" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>Agent 模式</label><select id="xnb-agent-driver" class="xnb-select"><option value="xboard-node">Xboard-Node</option><option value="nobrand-hybrid">NoBrand Hybrid</option></select></div>' +
+                '<div class="xnb-row"><label>状态</label><div id="xnb-machine-state" class="xnb-muted">-</div></div>' +
+                '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-primary" id="xnb-save-machine">保存机器模式</button><button type="button" class="xnb-btn" id="xnb-install-command">生成安装命令</button></div>' +
+                '<div id="xnb-machine-msg" class="xnb-status"></div>' +
+                '<div id="xnb-command-box" class="xnb-command" style="display:none"><div class="xnb-muted" style="margin-bottom:6px">命令包含 Machine Token，请勿公开。</div><textarea id="xnb-command" class="xnb-textarea" readonly></textarea><div class="xnb-actions"><button type="button" class="xnb-btn" id="xnb-copy-command">复制命令</button></div></div>' +
+              '</section>' +
+              '<section class="xnb-card">' +
+                '<h3>Mieru Runtime</h3>' +
+                '<div class="xnb-row"><label>Mieru 节点</label><select id="xnb-node" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>绑定机器</label><select id="xnb-node-machine" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>Runtime</label><select id="xnb-runtime" class="xnb-select"><option value="native">Native / Xboard-Node</option><option value="nobrand">NoBrand Runtime</option></select></div>' +
+                '<div id="xnb-nobrand-fields">' +
+                  '<div class="xnb-row"><label>Profile</label><select id="xnb-profile" class="xnb-select"><option value="iplc">IPLC / 专线性能</option><option value="balanced">Balanced</option><option value="stealth">Stealth</option></select></div>' +
+                  '<div class="xnb-row"><label>MTU</label><input id="xnb-mtu" class="xnb-input" value="1400" placeholder="1400 / safe / auto"></div>' +
+                  '<div class="xnb-row"><label>Handshake</label><select id="xnb-handshake" class="xnb-select"><option value="no-wait">NO_WAIT</option><option value="standard">Standard</option></select></div>' +
+                  '<div class="xnb-row"><label>Multiplexing</label><select id="xnb-mux" class="xnb-select"><option value="off">OFF</option><option value="low">LOW</option><option value="middle">MIDDLE</option><option value="high">HIGH</option></select></div>' +
+                  '<div class="xnb-row"><label>Display Host</label><input id="xnb-advertise-host" class="xnb-input" placeholder="留空=节点 Host"></div>' +
+                  '<div class="xnb-row"><label>Ingress Profile</label><input id="xnb-ingress-profile" class="xnb-input" placeholder="留空=NoBrand 默认入口"></div>' +
+                  '<div class="xnb-row"><label>端口策略</label><div class="xnb-check"><input id="xnb-pin-port" type="checkbox"><span class="xnb-muted">固定首用户为节点 server_port</span></div></div>' +
+                  '<div class="xnb-row"><label>同步展示入口</label><div class="xnb-check"><input id="xnb-sync-host" type="checkbox" checked><span class="xnb-muted">跟随 Display Host/节点 Host</span></div></div>' +
+                '</div>' +
+                '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-primary" id="xnb-save-node">保存 Runtime</button></div>' +
+                '<div id="xnb-node-msg" class="xnb-status"></div>' +
+              '</section>' +
+            '</div>' +
+          '</div>';
+
+        document.body.append(button, overlay);
+
+        let machines = [];
+        let nodes = [];
+        let capabilities = null;
+
+        const machineSelect = overlay.querySelector('#xnb-machine');
+        const nodeSelect = overlay.querySelector('#xnb-node');
+        const nodeMachineSelect = overlay.querySelector('#xnb-node-machine');
+        const driverSelect = overlay.querySelector('#xnb-agent-driver');
+        const runtimeSelect = overlay.querySelector('#xnb-runtime');
+        const machineMsg = overlay.querySelector('#xnb-machine-msg');
+        const nodeMsg = overlay.querySelector('#xnb-node-msg');
+        const fields = overlay.querySelector('#xnb-nobrand-fields');
+
+        const setMsg = (element, message, isError = false) => {
+          element.textContent = message || '';
+          element.className = 'xnb-status ' + (isError ? 'xnb-error' : (message ? 'xnb-ok' : ''));
+        };
+
+        const selectedMachine = () => machines.find((item) => String(item.id) === machineSelect.value);
+        const selectedNode = () => nodes.find((item) => String(item.id) === nodeSelect.value);
+
+        const setSelectOptions = (select, rows, labeler, includeEmpty = false) => {
+          const current = select.value;
+          select.replaceChildren();
+          if (includeEmpty) {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '未绑定';
+            select.appendChild(empty);
+          }
+          rows.forEach((item) => {
+            const option = document.createElement('option');
+            option.value = String(item.id);
+            option.textContent = labeler(item);
+            select.appendChild(option);
+          });
+          if (Array.from(select.options).some((option) => option.value === current)) select.value = current;
+        };
+
+        const renderMachine = () => {
+          const item = selectedMachine();
+          if (!item) {
+            driverSelect.value = 'xboard-node';
+            overlay.querySelector('#xnb-machine-state').textContent = '暂无机器';
+            return;
+          }
+          driverSelect.value = item.agent_driver || 'xboard-node';
+          const online = item.last_seen_at && (Date.now() / 1000 - Number(item.last_seen_at) < 180);
+          overlay.querySelector('#xnb-machine-state').innerHTML =
+            '<span class="xnb-badge">' + (online ? '在线' : '离线') + '</span>' +
+            '<span class="xnb-badge">' + escapeHtml(item.agent_driver || 'xboard-node') + '</span>' +
+            '<span class="xnb-muted">节点 ' + Number(item.servers_count || 0) + '</span>';
+        };
+
+        const normalizeSettings = (item) => {
+          const value = item?.runtime_driver_settings;
+          return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+        };
+
+        const renderNode = () => {
+          const item = selectedNode();
+          const settings = normalizeSettings(item);
+          if (!item) {
+            runtimeSelect.value = 'native';
+            fields.style.display = 'none';
+            return;
+          }
+          nodeMachineSelect.value = item.machine_id ? String(item.machine_id) : '';
+          runtimeSelect.value = item.runtime_driver || 'native';
+          overlay.querySelector('#xnb-profile').value = settings.profile || 'iplc';
+          overlay.querySelector('#xnb-mtu').value = settings.mtu ?? 1400;
+          overlay.querySelector('#xnb-handshake').value = settings.handshake_mode || 'no-wait';
+          overlay.querySelector('#xnb-mux').value = settings.multiplexing || 'off';
+          overlay.querySelector('#xnb-advertise-host').value = settings.advertise_host || '';
+          overlay.querySelector('#xnb-ingress-profile').value = settings.ingress_profile || '';
+          overlay.querySelector('#xnb-pin-port').checked = Boolean(settings.pin_primary_port);
+          overlay.querySelector('#xnb-sync-host').checked = settings.sync_advertise_host !== false;
+          fields.style.display = runtimeSelect.value === 'nobrand' ? '' : 'none';
+        };
+
+        const load = async () => {
+          setMsg(machineMsg, '');
+          setMsg(nodeMsg, '');
+          try {
+            const [machineData, nodeData, capData] = await Promise.all([
+              noBrandAdminApi('server/machine/fetch'),
+              noBrandAdminApi('server/manage/getNodes'),
+              noBrandAdminApi('server/machine/nobrandCapabilities')
+            ]);
+            machines = Array.isArray(machineData) ? machineData : (machineData?.data || []);
+            const allNodes = Array.isArray(nodeData) ? nodeData : (nodeData?.data || []);
+            nodes = allNodes.filter((item) => item.type === 'mieru');
+            capabilities = capData || {};
+
+            setSelectOptions(machineSelect, machines, (item) => item.name + ' (#' + item.id + ')');
+            setSelectOptions(nodeMachineSelect, machines, (item) => item.name + ' (#' + item.id + ')', true);
+            setSelectOptions(nodeSelect, nodes, (item) => item.name + ' (#' + item.id + ')');
+
+            const cap = overlay.querySelector('#xnb-cap');
+            cap.innerHTML =
+              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 2) + '</span>' +
+              '<span class="xnb-badge">NoBrand ' + escapeHtml(capabilities.version || 'v3.2.2') + '</span>' +
+              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.2.0') + '</span>' +
+              '<span class="xnb-muted">当前自动 Runtime：Mieru</span>';
+
+            renderMachine();
+            renderNode();
+          } catch (error) {
+            setMsg(machineMsg, error?.message || '加载失败', true);
+          }
+        };
+
+        machineSelect.onchange = renderMachine;
+        nodeSelect.onchange = renderNode;
+        runtimeSelect.onchange = () => {
+          fields.style.display = runtimeSelect.value === 'nobrand' ? '' : 'none';
+        };
+
+        overlay.querySelector('#xnb-save-machine').onclick = async () => {
+          const item = selectedMachine();
+          if (!item) return setMsg(machineMsg, '请选择机器', true);
+          setMsg(machineMsg, '正在保存…');
+          try {
+            await noBrandAdminApi('server/machine/save', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: item.id,
+                name: item.name,
+                notes: item.notes ?? null,
+                is_active: item.is_active !== false,
+                agent_driver: driverSelect.value,
+                agent_settings: item.agent_settings ?? null
+              })
+            });
+            setMsg(machineMsg, '机器 Agent 模式已保存');
+            await load();
+          } catch (error) {
+            setMsg(machineMsg, error?.message || '保存失败', true);
+          }
+        };
+
+        overlay.querySelector('#xnb-install-command').onclick = async () => {
+          const item = selectedMachine();
+          if (!item) return setMsg(machineMsg, '请选择机器', true);
+          setMsg(machineMsg, '正在生成安装命令…');
+          try {
+            const data = await noBrandAdminApi('server/machine/installCommand?id=' + encodeURIComponent(item.id));
+            const command = data.command || data.data?.command || '';
+            overlay.querySelector('#xnb-command').value = command;
+            overlay.querySelector('#xnb-command-box').style.display = command ? '' : 'none';
+            setMsg(machineMsg, command ? '安装命令已生成' : '未返回安装命令', !command);
+          } catch (error) {
+            setMsg(machineMsg, error?.message || '生成失败', true);
+          }
+        };
+
+        overlay.querySelector('#xnb-copy-command').onclick = async () => {
+          const field = overlay.querySelector('#xnb-command');
+          if (!field.value) return;
+          try {
+            await navigator.clipboard.writeText(field.value);
+            setMsg(machineMsg, '安装命令已复制');
+          } catch (_) {
+            field.select();
+            document.execCommand('copy');
+            setMsg(machineMsg, '安装命令已复制');
+          }
+        };
+
+        overlay.querySelector('#xnb-save-node').onclick = async () => {
+          const item = selectedNode();
+          if (!item) return setMsg(nodeMsg, '请选择 Mieru 节点', true);
+
+          const machineId = nodeMachineSelect.value ? Number(nodeMachineSelect.value) : null;
+          const runtime = runtimeSelect.value;
+          if (runtime === 'nobrand' && !machineId) {
+            return setMsg(nodeMsg, 'NoBrand Runtime 必须绑定 Hybrid 机器', true);
+          }
+
+          const settings = runtime === 'nobrand' ? {
+            profile: overlay.querySelector('#xnb-profile').value,
+            mtu: overlay.querySelector('#xnb-mtu').value || '1400',
+            handshake_mode: overlay.querySelector('#xnb-handshake').value,
+            multiplexing: overlay.querySelector('#xnb-mux').value,
+            advertise_host: overlay.querySelector('#xnb-advertise-host').value.trim(),
+            ingress_profile: overlay.querySelector('#xnb-ingress-profile').value.trim(),
+            pin_primary_port: overlay.querySelector('#xnb-pin-port').checked,
+            sync_advertise_host: overlay.querySelector('#xnb-sync-host').checked
+          } : {};
+
+          setMsg(nodeMsg, '正在保存…');
+          try {
+            await noBrandAdminApi('server/manage/update', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: item.id,
+                machine_id: machineId,
+                runtime_driver: runtime,
+                runtime_driver_settings: settings
+              })
+            });
+            setMsg(nodeMsg, runtime === 'nobrand' ? 'NoBrand Mieru Runtime 已保存，Companion 将自动对账' : '已切回 Native Runtime');
+            await load();
+          } catch (error) {
+            setMsg(nodeMsg, error?.message || '保存失败', true);
+          }
+        };
+
+        button.onclick = () => {
+          overlay.style.display = 'flex';
+          load();
+        };
+        overlay.querySelector('#xnb-close').onclick = () => overlay.style.display = 'none';
+        overlay.addEventListener('click', (event) => {
+          if (event.target === overlay) overlay.style.display = 'none';
+        });
+      };
+
       let scheduled = false;
       const clean = () => {
         if (scheduled) return;
@@ -659,6 +965,7 @@
           ensureAccessInviteButton();
           ensureLiteNavigation();
           ensureLiteDashboard();
+          ensureNoBrandManager();
         });
       };
 
