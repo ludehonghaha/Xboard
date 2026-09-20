@@ -25,6 +25,7 @@ class ClashMeta extends AbstractProtocol
         Server::TYPE_SOCKS,
         Server::TYPE_HTTP,
         Server::TYPE_MIERU,
+        Server::TYPE_SNELL,
     ];
 
     protected $protocolRequirements = [
@@ -192,6 +193,10 @@ class ClashMeta extends AbstractProtocol
             }
             if ($item['type'] === Server::TYPE_MIERU) {
                 array_push($proxy, self::buildMieru($item['password'], $item));
+                array_push($proxies, $item['name']);
+            }
+            if ($item['type'] === Server::TYPE_SNELL) {
+                array_push($proxy, self::buildSnell($item['password'], $item));
                 array_push($proxies, $item['name']);
             }
         }
@@ -683,6 +688,21 @@ class ClashMeta extends AbstractProtocol
         self::appendEch($array, data_get($protocol_settings, 'tls.ech'));
 
         return $array;
+    }
+
+    public static function buildSnell($password, $server)
+    {
+        return [
+            'name' => $server['name'],
+            'type' => 'snell',
+            'server' => $server['host'],
+            'port' => (int) $server['port'],
+            'psk' => data_get($server, 'password', $password),
+            'version' => (int) data_get($server, 'protocol_settings.version', 5),
+            // Mihomo's normal Snell UDP relay support. This is distinct from
+            // the server-side Snell v5 QUIC Proxy exposure.
+            'udp' => true,
+        ];
     }
 
     public static function buildMieru($password, $server)
