@@ -30,6 +30,7 @@ class ServerRoute
             'prefix' => 'server/machine',
         ], function ($route) {
             $route->post('nodes', [MachineController::class, 'nodes']);
+            $route->post('nobrand-nodes', [MachineController::class, 'nobrandNodes']);
             $route->post('status', [MachineController::class, 'status']);
         });
     }
