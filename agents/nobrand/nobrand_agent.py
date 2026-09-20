@@ -563,9 +563,9 @@ def apply_hy2_multiclient_overlay(
 
 def reconcile_hy2_node(node: dict[str, Any] | None) -> list[dict[str, Any]]:
     owner = load_hy2_owner()
-    state = load_json_object(NOBRAND_HY2_STATE_FILE, "NoBrand HY2 state")
-    config = load_json_object(NOBRAND_HY2_CONFIG_FILE, "NoBrand HY2 config")
 
+    # An unowned NoBrand HY2 runtime belongs to the operator, not Xboard.
+    # If Xboard has no HY2 node, do not even parse or validate those files.
     if node is None:
         if owner is not None:
             remove_owned_hy2_runtime()
@@ -586,12 +586,15 @@ def reconcile_hy2_node(node: dict[str, Any] | None) -> list[dict[str, Any]]:
             remove_owned_hy2_runtime()
         return []
 
-    if owner is None and (state is not None or config is not None):
+    if owner is None and hy2_runtime_files_exist():
         raise RuntimeError(
             "an unmanaged NoBrand Hysteria2 runtime already exists; remove it before Xboard takeover"
         )
 
+    state = load_json_object(NOBRAND_HY2_STATE_FILE, "NoBrand HY2 state")
+    config = load_json_object(NOBRAND_HY2_CONFIG_FILE, "NoBrand HY2 config")
     installed_here = False
+
     try:
         if owner is None:
             install_hy2_runtime(node)
