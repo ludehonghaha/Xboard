@@ -273,3 +273,98 @@ for token in [
         raise SystemExit(f"[FAIL] Snell nft ruleset missing token: {token}")
 
 print("[PASS] Snell nft ruleset render smoke tests")
+
+
+hy2_base = {
+    "log": {"loglevel": "warning"},
+    "inbounds": [{
+        "tag": "nobrand-hy2",
+        "listen": "0.0.0.0",
+        "port": 23037,
+        "protocol": "hysteria",
+        "settings": {
+            "version": 2,
+            "clients": [{"auth": "bootstrap", "email": "hysteria2@xray"}],
+        },
+        "streamSettings": {
+            "network": "hysteria",
+            "security": "tls",
+            "tlsSettings": {
+                "alpn": ["h3"],
+                "certificates": [{
+                    "certificateFile": "/etc/nobrand-oneclick/hysteria2/hysteria2-cert.pem",
+                    "keyFile": "/etc/nobrand-oneclick/hysteria2/hysteria2-key.pem",
+                }],
+            },
+            "hysteriaSettings": {"version": 2},
+            "finalmask": {
+                "udp": [{
+                    "type": "salamander",
+                    "settings": {"password": "obfs-secret"},
+                }]
+            },
+        },
+    }],
+    "outbounds": [{"tag": "direct", "protocol": "freedom"}],
+    "routing": {"rules": []},
+}
+
+hy2_after = agent.build_hy2_multiclient_config(
+    hy2_base,
+    [
+        {
+            "user_id": 7,
+            "password": "550e8400-e29b-41d4-a716-446655440000",
+        },
+        {
+            "user_id": 8,
+            "password": "660e8400-e29b-41d4-a716-446655440000",
+        },
+    ],
+)
+agent.assert_hy2_overlay_preserves_runtime(hy2_base, hy2_after)
+
+assert_equal(
+    hy2_after["inbounds"][0]["settings"]["clients"],
+    [
+        {
+            "auth": "550e8400-e29b-41d4-a716-446655440000",
+            "email": "xbh7@xboard.invalid",
+        },
+        {
+            "auth": "660e8400-e29b-41d4-a716-446655440000",
+            "email": "xbh8@xboard.invalid",
+        },
+    ],
+    "HY2 overlay replaces only the client auth list",
+)
+
+assert_equal(
+    hy2_after["inbounds"][0]["streamSettings"]["finalmask"]["udp"][0]["settings"]["password"],
+    "obfs-secret",
+    "HY2 overlay preserves Salamander password",
+)
+assert_equal(
+    hy2_after["inbounds"][0]["port"],
+    23037,
+    "HY2 overlay preserves listener port",
+)
+assert_equal(
+    hy2_base["inbounds"][0]["settings"]["clients"][0]["auth"],
+    "bootstrap",
+    "HY2 overlay does not mutate the base config object",
+)
+
+bad_hy2 = json.loads(json.dumps(hy2_base))
+bad_hy2["inbounds"][0]["protocol"] = "vless"
+try:
+    agent.build_hy2_multiclient_config(
+        bad_hy2,
+        [{"user_id": 7, "password": "auth"}],
+    )
+except RuntimeError:
+    pass
+else:
+    raise SystemExit("[FAIL] HY2 overlay accepted a non-Hysteria inbound")
+
+print("[PASS] HY2 multi-client overlay smoke tests")
