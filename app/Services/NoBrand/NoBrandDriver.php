@@ -118,8 +118,8 @@ final class NoBrandDriver
         return implode(' && ', [
             'set -e',
             'tmp="$(mktemp /tmp/xboard-nobrand.XXXXXX.sh)"',
-            "curl -fsSL {$url} -o "\$tmp"",
-            "test "\$(sha256sum "\$tmp" | awk '{print \$1}')" = {$sha}",
+            'curl -fsSL ' . $url . ' -o "$tmp"',
+            'printf \'%s  %s\\n\' ' . $sha . ' "$tmp" | sha256sum -c -',
             'sudo bash "$tmp" manager install',
             'rm -f "$tmp"',
             'sudo nobrand --version',
