@@ -7,6 +7,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ServerSave;
 use App\Models\Server;
 use App\Models\ServerGroup;
+use App\Models\ServerMachine;
+use App\Services\NoBrand\NoBrandInstaller;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +16,24 @@ use Illuminate\Support\Facades\Log;
 
 class ManageController extends Controller
 {
+    private function validateMachineBinding(?int $machineId): ?array
+    {
+        if (!$machineId) {
+            return null;
+        }
+
+        $machine = ServerMachine::find($machineId);
+        if (!$machine) {
+            return [422, '机器不存在'];
+        }
+
+        if (($machine->agent_driver ?: 'xboard-node') === NoBrandInstaller::DRIVER) {
+            return [422, 'NoBrand-OneClick 是独立机器，不能绑定 Xboard 节点'];
+        }
+
+        return null;
+    }
+
     public function getNodes(Request $request)
     {
         $servers = ServerService::getAllServers()->map(function ($item) {
@@ -52,6 +72,10 @@ class ManageController extends Controller
     public function save(ServerSave $request)
     {
         $params = $request->validated();
+        if ($error = $this->validateMachineBinding(isset($params['machine_id']) ? (int) $params['machine_id'] : null)) {
+            return $this->fail($error);
+        }
+
         if ($request->input('id')) {
             $server = Server::find($request->input('id'));
             if (!$server) {
@@ -93,7 +117,11 @@ class ManageController extends Controller
             $server->show = (int) $params['show'];
         }
         if (array_key_exists('machine_id', $params)) {
-            $server->machine_id = $params['machine_id'] ?: null;
+            $machineId = $params['machine_id'] ? (int) $params['machine_id'] : null;
+            if ($error = $this->validateMachineBinding($machineId)) {
+                return $this->fail($error);
+            }
+            $server->machine_id = $machineId;
         }
         if (array_key_exists('enabled', $params)) {
             $server->enabled = (bool) $params['enabled'];
@@ -242,7 +270,11 @@ class ManageController extends Controller
             $update['enabled'] = (bool) $params['enabled'];
         }
         if (array_key_exists('machine_id', $params)) {
-            $update['machine_id'] = $params['machine_id'] ?: null;
+            $machineId = $params['machine_id'] ? (int) $params['machine_id'] : null;
+            if ($error = $this->validateMachineBinding($machineId)) {
+                return $this->fail($error);
+            }
+            $update['machine_id'] = $machineId;
         }
 
         if (empty($update)) {
