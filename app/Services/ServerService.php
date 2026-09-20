@@ -88,48 +88,59 @@ class ServerService
             ->get()
             ->append(['last_check_at', 'last_push_at', 'online', 'is_online', 'available_status', 'cache_key', 'server_key']);
 
-        $noBrandMieruIds = $servers
+        $noBrandDedicatedIds = $servers
             ->filter(fn (Server $server) =>
                 $server->runtime_driver === 'nobrand'
-                && $server->type === Server::TYPE_MIERU
+                && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)
             )
             ->pluck('id')
             ->all();
 
-        $bindings = empty($noBrandMieruIds)
+        $bindings = empty($noBrandDedicatedIds)
             ? collect()
             : NoBrandUserBinding::query()
                 ->where('user_id', $user->id)
-                ->whereIn('server_id', $noBrandMieruIds)
+                ->whereIn('server_id', $noBrandDedicatedIds)
                 ->where('enabled', true)
                 ->get()
                 ->keyBy('server_id');
 
         $servers = $servers
             ->filter(function (Server $server) use ($bindings) {
-                if ($server->runtime_driver !== 'nobrand' || $server->type !== Server::TYPE_MIERU) {
+                if (
+                    $server->runtime_driver !== 'nobrand'
+                    || !in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)
+                ) {
                     return true;
                 }
 
-                // A dedicated NoBrand Mieru user must not leak the node's
-                // generic port into a subscription before the agent reports
-                // the real per-user endpoint.
+                // Dedicated NoBrand runtimes must not leak the logical node's
+                // generic port before the companion reports the real per-user
+                // endpoint.
                 return $bindings->has($server->id);
             })
             ->map(function (Server $server) use ($user, $bindings) {
-                if ($server->runtime_driver === 'nobrand' && $server->type === Server::TYPE_MIERU) {
+                if (
+                    $server->runtime_driver === 'nobrand'
+                    && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)
+                ) {
                     /** @var NoBrandUserBinding $binding */
                     $binding = $bindings->get($server->id);
 
                     $server->host = $binding->display_host ?: $server->host;
                     $server->port = (int) $binding->display_port;
-                    $server->username = $binding->remote_user;
                     $server->password = $user->uuid;
                     $server->runtime_binding = [
                         'instance_id' => $binding->instance_id,
                         'transport' => $binding->transport,
                         'last_synced_at' => $binding->last_synced_at,
                     ];
+
+                    if ($server->type === Server::TYPE_MIERU) {
+                        $server->username = $binding->remote_user;
+                    } else {
+                        $server->runtime_binding['instance_name'] = $binding->remote_user;
+                    }
                 } else {
                     // 判断动态端口
                     if (str_contains((string) $server->port, '-')) {
