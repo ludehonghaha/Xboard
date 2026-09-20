@@ -31,6 +31,49 @@ class ManageController extends Controller
             return [422, 'NoBrand Agent Phase 2 当前仅开放 Mieru Runtime'];
         }
 
+        $settings = $params['runtime_driver_settings']
+            ?? $existing?->runtime_driver_settings
+            ?? [];
+
+        if (!is_array($settings)) {
+            return [422, 'NoBrand Runtime 设置格式无效'];
+        }
+
+        $profile = $settings['profile'] ?? 'iplc';
+        if (!in_array($profile, ['iplc', 'balanced', 'stealth'], true)) {
+            return [422, 'NoBrand Profile 仅支持 iplc / balanced / stealth'];
+        }
+
+        $handshake = $settings['handshake_mode'] ?? 'no-wait';
+        if (!in_array($handshake, ['no-wait', 'standard'], true)) {
+            return [422, 'NoBrand Handshake 仅支持 no-wait / standard'];
+        }
+
+        $multiplexing = $settings['multiplexing'] ?? 'off';
+        if (!in_array($multiplexing, ['off', 'low', 'middle', 'high'], true)) {
+            return [422, 'NoBrand Multiplexing 参数无效'];
+        }
+
+        $mtu = $settings['mtu'] ?? 1400;
+        $mtuValid = in_array($mtu, ['safe', 'auto'], true)
+            || (is_numeric($mtu) && (int) $mtu >= 1280 && (int) $mtu <= 1500);
+        if (!$mtuValid) {
+            return [422, 'NoBrand MTU 仅支持 safe / auto / 1280-1500'];
+        }
+
+        foreach (['advertise_host' => 255, 'ingress_profile' => 128] as $field => $maxLength) {
+            $value = $settings[$field] ?? null;
+            if ($value !== null && (!is_string($value) || mb_strlen($value) > $maxLength)) {
+                return [422, "NoBrand {$field} 参数无效"];
+            }
+        }
+
+        foreach (['pin_primary_port', 'sync_advertise_host'] as $field) {
+            if (array_key_exists($field, $settings) && !is_bool($settings[$field])) {
+                return [422, "NoBrand {$field} 必须为布尔值"];
+            }
+        }
+
         if (!$machineId) {
             return [422, 'NoBrand Runtime 节点必须绑定 NoBrand Hybrid 机器'];
         }
