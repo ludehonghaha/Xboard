@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Jobs\StatServerJob;
 use App\Jobs\StatUserJob;
 use App\Jobs\TrafficFetchJob;
-use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Server;
 use App\Models\User;
@@ -103,17 +102,6 @@ class UserService
         return true;
     }
 
-    public function isNotCompleteOrderByUserId(int $userId): bool
-    {
-        $order = Order::whereIn('status', [0, 1])
-            ->where('user_id', $userId)
-            ->first();
-        if (!$order) {
-            return false;
-        }
-        return true;
-    }
-
     public function trafficFetch(Server $server, string $protocol, array $data)
     {
         $server->rate = $server->getCurrentRate();
@@ -194,7 +182,6 @@ class UserService
     private function setOptionalFields(User $user, array $data): void
     {
         $optionalFields = [
-            'invite_user_id',
             'telegram_id',
             'group_id',
             'speed_limit',
