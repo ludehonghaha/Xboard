@@ -745,7 +745,7 @@ class SingBox extends AbstractProtocol
             'server_port' => $server['port'],
             'congestion_control' => data_get($protocol_settings, 'congestion_control', 'cubic'),
             'udp_relay_mode' => data_get($protocol_settings, 'udp_relay_mode', 'native'),
-            'zero_rtt_handshake' => true,
+            'zero_rtt_handshake' => (bool) data_get($server, 'runtime_binding.zero_rtt_handshake', data_get($server, 'runtime_driver') === 'nobrand' ? false : true),
             'heartbeat' => '10s',
             'tls' => [
                 'enabled' => true,
@@ -762,8 +762,8 @@ class SingBox extends AbstractProtocol
         if (data_get($protocol_settings, 'version') === 4) {
             $array['token'] = $password;
         } else {
-            $array['uuid'] = $password;
-            $array['password'] = $password;
+            $array['uuid'] = data_get($server, 'runtime_binding.uuid', $password);
+            $array['password'] = data_get($server, 'runtime_binding.password', data_get($server, 'password', $password));
         }
 
         return $array;
