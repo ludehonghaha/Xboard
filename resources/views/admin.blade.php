@@ -780,12 +780,39 @@
             overlay.querySelector('#xnb-machine-state').textContent = '暂无机器';
             return;
           }
+
           driverSelect.value = item.agent_driver || 'xboard-node';
-          const online = item.last_seen_at && (Date.now() / 1000 - Number(item.last_seen_at) < 180);
-          overlay.querySelector('#xnb-machine-state').innerHTML =
-            '<span class="xnb-badge">' + (online ? '在线' : '离线') + '</span>' +
+
+          const now = Date.now() / 1000;
+          const online = item.last_seen_at && (now - Number(item.last_seen_at) < 180);
+          const isHybrid = (item.agent_driver || 'xboard-node') === 'nobrand-hybrid';
+          const nbStatus = item.nobrand_status && typeof item.nobrand_status === 'object'
+            ? item.nobrand_status
+            : {};
+          const nbOnline = isHybrid && item.nobrand_last_seen_at
+            && (now - Number(item.nobrand_last_seen_at) < 120);
+          const nbState = nbStatus.state || 'unknown';
+
+          let html =
+            '<span class="xnb-badge">' + (online ? 'Xboard-Node 在线' : 'Xboard-Node 离线') + '</span>' +
             '<span class="xnb-badge">' + escapeHtml(item.agent_driver || 'xboard-node') + '</span>' +
             '<span class="xnb-muted">节点 ' + Number(item.servers_count || 0) + '</span>';
+
+          if (isHybrid) {
+            html += '<div style="margin-top:7px">' +
+              '<span class="xnb-badge">' + (nbOnline ? 'Companion 在线' : 'Companion 离线') + '</span>' +
+              '<span class="xnb-badge">' + escapeHtml(nbState === 'ok' ? '对账 OK' : nbState === 'error' ? '对账 Error' : '未上报') + '</span>' +
+              '<span class="xnb-muted">托管用户 ' + Number(nbStatus.managed_users || 0) +
+              ' · Binding ' + Number(nbStatus.bindings || 0) +
+              ' · ' + Number(nbStatus.reconcile_ms || 0) + ' ms</span></div>';
+
+            if (nbState === 'error' && nbStatus.message) {
+              html += '<div class="xnb-error" style="margin-top:6px">' +
+                escapeHtml(String(nbStatus.message)) + '</div>';
+            }
+          }
+
+          overlay.querySelector('#xnb-machine-state').innerHTML = html;
         };
 
         const normalizeSettings = (item) => {
