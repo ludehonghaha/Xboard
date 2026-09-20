@@ -39,7 +39,7 @@ final class NoBrandDriver
 
     /**
      * Xboard node types currently implemented by the NoBrand companion.
-     * Snell / Sudoku / SSH / Forward need dedicated panel modelling later.
+     * Sudoku / SSH / Forward still need dedicated panel modelling.
      */
     public const PANEL_RUNTIME_TYPES = [
         'mieru',
