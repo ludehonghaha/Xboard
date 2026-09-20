@@ -330,12 +330,9 @@ class PluginManager
             return false;
         }
 
-        // 验证插件类型
-        if (isset($config['type'])) {
-            $validTypes = ['feature', 'payment'];
-            if (!in_array($config['type'], $validTypes)) {
-                return false;
-            }
+        // Xboard Lite only accepts feature plugins.
+        if (isset($config['type']) && $config['type'] !== Plugin::TYPE_FEATURE) {
+            return false;
         }
 
         return true;
@@ -695,14 +692,6 @@ class PluginManager
             ->all();
 
         return array_intersect_key($this->loadedPlugins, array_flip($enabledPluginCodes));
-    }
-
-    /**
-     * Get enabled payment plugins
-     */
-    public function getEnabledPaymentPlugins(): array
-    {
-        return $this->getEnabledPluginsByType('payment');
     }
 
     /**
