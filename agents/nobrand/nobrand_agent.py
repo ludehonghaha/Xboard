@@ -24,6 +24,7 @@ import json
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -34,7 +35,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 MANAGED_USER_RE = re.compile(r"^xb[1-9][0-9]*$")
 MANAGED_SNELL_RE = re.compile(r"^xbn([1-9][0-9]*)u([1-9][0-9]*)$")
 ALLOWED_TRANSPORTS = {"TCP", "UDP"}
@@ -46,6 +47,9 @@ MITA_BIN = "/usr/local/lib/nobrand-oneclick/bin/mita"
 MITA_INSTANCES_DIR = "/etc/mita/instances"
 MITA_INSTANCE_RUN_DIR = "/run/mita-instances"
 SNELL_STATE_DIR = "/var/lib/nobrand-oneclick/snell/instances"
+SNELL_METER_STATE_FILE = "/var/lib/xboard-nobrand-agent/snell-meter.json"
+SNELL_METER_TABLE = "xboard_nobrand_meter"
+SNELL_METER_OWNER = "xboard_owner_v1"
 
 STOP = False
 
@@ -66,6 +70,7 @@ class Config:
     token: str
     poll_interval: int = 30
     timeout: int = 20
+    snell_meter: str = "off"
 
 
 def load_config(path: str) -> Config:
@@ -77,6 +82,9 @@ def load_config(path: str) -> Config:
     token = str(raw.get("token") or "")
     poll_interval = max(10, min(3600, int(raw.get("poll_interval") or 30)))
     timeout = max(5, min(120, int(raw.get("timeout") or 20)))
+    snell_meter = str(raw.get("snell_meter") or "off").strip().lower()
+    if snell_meter not in {"off", "nft"}:
+        raise ValueError("snell_meter must be off or nft")
 
     parsed = urllib.parse.urlparse(panel_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -86,7 +94,7 @@ def load_config(path: str) -> Config:
     if not token:
         raise ValueError("token is required")
 
-    return Config(panel_url, machine_id, token, poll_interval, timeout)
+    return Config(panel_url, machine_id, token, poll_interval, timeout, snell_meter)
 
 
 def api_post(cfg: Config, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -536,6 +544,126 @@ def reconcile_mieru(node: dict[str, Any]) -> list[dict[str, Any]]:
         })
 
     return bindings
+
+
+def advance_snell_meter_state(
+    previous: dict[str, Any],
+    current_raw: dict[str, dict[str, int]],
+    desired_ports: dict[str, int],
+) -> dict[str, Any]:
+    prev_instances = previous.get("instances")
+    if not isinstance(prev_instances, dict):
+        prev_instances = {}
+
+    next_instances: dict[str, dict[str, int]] = {}
+
+    for instance_id, port in desired_ports.items():
+        old = prev_instances.get(instance_id)
+        if not isinstance(old, dict):
+            old = {}
+
+        total_u = max(0, int(old.get("total_u") or 0))
+        total_d = max(0, int(old.get("total_d") or 0))
+        raw_u = max(0, int(old.get("raw_u") or 0))
+        raw_d = max(0, int(old.get("raw_d") or 0))
+
+        current = current_raw.get(instance_id)
+        if isinstance(current, dict):
+            now_u = max(0, int(current.get("upload_bytes") or 0))
+            now_d = max(0, int(current.get("download_bytes") or 0))
+
+            # nft named counters may reset when the owned table is rebuilt.
+            # A lower raw counter therefore means "new counter epoch", not
+            # negative traffic.
+            total_u += now_u - raw_u if now_u >= raw_u else now_u
+            total_d += now_d - raw_d if now_d >= raw_d else now_d
+            raw_u = now_u
+            raw_d = now_d
+
+        next_instances[instance_id] = {
+            "port": int(port),
+            "raw_u": raw_u,
+            "raw_d": raw_d,
+            "total_u": total_u,
+            "total_d": total_d,
+        }
+
+    return {
+        "version": 1,
+        "instances": next_instances,
+    }
+
+
+def reset_snell_meter_raw(
+    state: dict[str, Any],
+    desired_ports: dict[str, int],
+) -> dict[str, Any]:
+    instances = state.get("instances")
+    if not isinstance(instances, dict):
+        instances = {}
+
+    result: dict[str, dict[str, int]] = {}
+    for instance_id, port in desired_ports.items():
+        old = instances.get(instance_id)
+        if not isinstance(old, dict):
+            old = {}
+        result[instance_id] = {
+            "port": int(port),
+            "raw_u": 0,
+            "raw_d": 0,
+            "total_u": max(0, int(old.get("total_u") or 0)),
+            "total_d": max(0, int(old.get("total_d") or 0)),
+        }
+
+    return {"version": 1, "instances": result}
+
+
+def load_snell_meter_state() -> dict[str, Any]:
+    try:
+        with open(SNELL_METER_STATE_FILE, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except FileNotFoundError:
+        return {"version": 1, "instances": {}}
+    except Exception as exc:
+        raise RuntimeError("Snell meter state is invalid") from exc
+
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        raise RuntimeError("Snell meter state version is invalid")
+    if not isinstance(payload.get("instances"), dict):
+        raise RuntimeError("Snell meter state instances are invalid")
+    return payload
+
+
+def save_snell_meter_state(state: dict[str, Any]) -> None:
+    directory = os.path.dirname(SNELL_METER_STATE_FILE)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    os.chmod(directory, 0o700)
+
+    tmp = SNELL_METER_STATE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, separators=(",", ":"), sort_keys=True)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, SNELL_METER_STATE_FILE)
+
+
+def snell_meter_totals(state: dict[str, Any]) -> dict[str, dict[str, int]]:
+    result: dict[str, dict[str, int]] = {}
+    instances = state.get("instances")
+    if not isinstance(instances, dict):
+        return result
+
+    for instance_id, item in instances.items():
+        if not isinstance(item, dict):
+            continue
+        result[str(instance_id)] = {
+            "upload_bytes": max(0, int(item.get("total_u") or 0)),
+            "download_bytes": max(0, int(item.get("total_d") or 0)),
+        }
+    return result
 
 
 def snell_platform_supported() -> bool:
