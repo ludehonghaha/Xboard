@@ -538,6 +538,11 @@ def reconcile_mieru(node: dict[str, Any]) -> list[dict[str, Any]]:
     return bindings
 
 
+def snell_platform_supported() -> bool:
+    machine = os.uname().machine.lower()
+    return machine in {"x86_64", "amd64", "aarch64", "arm64"}
+
+
 def load_snell_states() -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     if not os.path.isdir(SNELL_STATE_DIR):
@@ -577,6 +582,11 @@ def delete_snell_instance(name: str) -> None:
 
 
 def install_snell_instance(node: dict[str, Any], desired: dict[str, Any]) -> None:
+    if not snell_platform_supported():
+        raise RuntimeError(
+            f"Snell v5 is unsupported on architecture {os.uname().machine}"
+        )
+
     name = str(desired["remote_user"])
     if not MANAGED_SNELL_RE.fullmatch(name):
         raise RuntimeError("invalid managed Snell instance name")
