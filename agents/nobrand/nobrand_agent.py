@@ -35,7 +35,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 MANAGED_USER_RE = re.compile(r"^xb[1-9][0-9]*$")
 MANAGED_SNELL_RE = re.compile(r"^xbn([1-9][0-9]*)u([1-9][0-9]*)$")
 ALLOWED_TRANSPORTS = {"TCP", "UDP"}
@@ -52,6 +52,9 @@ SNELL_METER_TABLE = "xboard_nobrand_meter"
 SNELL_METER_OWNER = "xboard_owner_v1"
 NOBRAND_HY2_CONFIG_FILE = "/etc/nobrand-oneclick/hysteria2/config.json"
 NOBRAND_HY2_STATE_FILE = "/var/lib/nobrand-oneclick/hysteria2/state.json"
+NOBRAND_XRAY_BIN = "/usr/local/lib/nobrand-oneclick/bin/xray"
+NOBRAND_XRAY_ASSET_DIR = "/usr/local/lib/nobrand-oneclick/xray-assets"
+HY2_OWNER_FILE = "/var/lib/xboard-nobrand-agent/hy2-owner.json"
 
 STOP = False
 
@@ -341,6 +344,314 @@ def assert_hy2_overlay_preserves_runtime(
     # left_clients may be any upstream single-client bootstrap value.
 
 
+def load_json_object(path: str, label: str) -> dict[str, Any] | None:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        raise RuntimeError(f"{label} is invalid JSON") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{label} must be a JSON object")
+    return payload
+
+
+def save_root_json(path: str, payload: dict[str, Any]) -> None:
+    directory = os.path.dirname(path)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except PermissionError:
+        pass
+
+    fd, tmp = tempfile.mkstemp(prefix=".xboard-hy2.", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, separators=(",", ":"), sort_keys=True)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def load_hy2_owner() -> dict[str, Any] | None:
+    owner = load_json_object(HY2_OWNER_FILE, "HY2 owner state")
+    if owner is None:
+        return None
+    if int(owner.get("version") or 0) != 1 or int(owner.get("node_id") or 0) <= 0:
+        raise RuntimeError("HY2 owner state is invalid")
+    return owner
+
+
+def save_hy2_owner(node_id: int) -> None:
+    save_root_json(HY2_OWNER_FILE, {
+        "version": 1,
+        "node_id": int(node_id),
+        "managed_by": "xboard-nobrand-agent",
+        "updated_at": int(time.time()),
+    })
+
+
+def clear_hy2_owner() -> None:
+    try:
+        os.unlink(HY2_OWNER_FILE)
+    except FileNotFoundError:
+        pass
+
+
+def hy2_runtime_files_exist() -> bool:
+    return os.path.isfile(NOBRAND_HY2_CONFIG_FILE) or os.path.isfile(NOBRAND_HY2_STATE_FILE)
+
+
+def hy2_node_parameters(node: dict[str, Any]) -> dict[str, Any]:
+    protocol = node.get("protocol_settings")
+    if not isinstance(protocol, dict):
+        protocol = {}
+    tls = protocol.get("tls")
+    if not isinstance(tls, dict):
+        tls = {}
+
+    sni = str(tls.get("server_name") or "").strip()
+    port = int(node.get("server_port") or 0)
+    display_host = str(runtime_settings(node).get("advertise_host") or node.get("host") or "").strip()
+    ingress = str(runtime_settings(node).get("ingress_profile") or "").strip()
+
+    if not sni or len(sni) > 255:
+        raise RuntimeError("NoBrand HY2 requires a valid SNI")
+    if not 1 <= port <= 65535:
+        raise RuntimeError("NoBrand HY2 requires server_port 1-65535")
+    if not display_host or len(display_host) > 255:
+        raise RuntimeError("NoBrand HY2 requires a display host")
+
+    return {
+        "sni": sni,
+        "port": port,
+        "display_host": display_host,
+        "ingress_profile": ingress,
+    }
+
+
+def hy2_state_matches_node(node: dict[str, Any], state: dict[str, Any]) -> bool:
+    wanted = hy2_node_parameters(node)
+    if state.get("protocol") != "hysteria2":
+        return False
+    if not bool(state.get("enabled", True)):
+        return False
+    if int(state.get("listen_port") or 0) != wanted["port"]:
+        return False
+    if str(state.get("sni") or "") != wanted["sni"]:
+        return False
+    if str(state.get("advertise_host") or "") != wanted["display_host"]:
+        return False
+    if int(state.get("advertise_port") or 0) != wanted["port"]:
+        return False
+
+    if wanted["ingress_profile"]:
+        if str(state.get("ingress_profile_id") or "") != wanted["ingress_profile"]:
+            return False
+
+    return True
+
+
+def install_hy2_runtime(node: dict[str, Any]) -> None:
+    wanted = hy2_node_parameters(node)
+    args = [
+        "hy2", "install",
+        "--sni", wanted["sni"],
+        "--port", str(wanted["port"]),
+        "--advertise-host", wanted["display_host"],
+        "--advertise-port", str(wanted["port"]),
+        "-y",
+    ]
+    if wanted["ingress_profile"]:
+        args.extend(["--ingress-profile", wanted["ingress_profile"]])
+    run_nb(args)
+
+
+def remove_owned_hy2_runtime() -> None:
+    owner = load_hy2_owner()
+    if owner is None:
+        return
+    if hy2_runtime_files_exist():
+        run_nb(["hy2", "remove", "-y"])
+    clear_hy2_owner()
+    log("removed Xboard-owned Hysteria2 runtime")
+
+
+def validate_xray_config(path: str) -> None:
+    if not os.path.isfile(NOBRAND_XRAY_BIN) or not os.access(NOBRAND_XRAY_BIN, os.X_OK):
+        raise RuntimeError("NoBrand Xray runtime is unavailable")
+
+    env = os.environ.copy()
+    env["XRAY_LOCATION_ASSET"] = NOBRAND_XRAY_ASSET_DIR
+    proc = subprocess.run(
+        [NOBRAND_XRAY_BIN, "run", "-test", "-c", path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError("NoBrand HY2 overlay failed Xray config validation")
+
+
+def apply_hy2_multiclient_overlay(
+    users: list[dict[str, Any]],
+) -> bool:
+    base = load_json_object(NOBRAND_HY2_CONFIG_FILE, "NoBrand HY2 config")
+    if base is None:
+        raise RuntimeError("NoBrand HY2 config is unavailable")
+
+    candidate = build_hy2_multiclient_config(base, users)
+    assert_hy2_overlay_preserves_runtime(base, candidate)
+
+    if json.dumps(base, sort_keys=True, separators=(",", ":")) == json.dumps(
+        candidate, sort_keys=True, separators=(",", ":")
+    ):
+        return False
+
+    directory = os.path.dirname(NOBRAND_HY2_CONFIG_FILE)
+    fd, tmp = tempfile.mkstemp(prefix=".xboard-hy2-config.", suffix=".json", dir=directory)
+    backup = NOBRAND_HY2_CONFIG_FILE + ".xboard-backup"
+
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(candidate, fh, separators=(",", ":"))
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        validate_xray_config(tmp)
+
+        shutil.copy2(NOBRAND_HY2_CONFIG_FILE, backup)
+        os.chmod(backup, 0o600)
+        os.replace(tmp, NOBRAND_HY2_CONFIG_FILE)
+        os.chmod(NOBRAND_HY2_CONFIG_FILE, 0o600)
+
+        restart = run_nb(["hy2", "restart"], allow_fail=True)
+        status = run_nb(["hy2", "status"], allow_fail=True)
+        if restart.returncode != 0 or status.returncode != 0:
+            shutil.copy2(backup, NOBRAND_HY2_CONFIG_FILE)
+            os.chmod(NOBRAND_HY2_CONFIG_FILE, 0o600)
+            run_nb(["hy2", "restart"], allow_fail=True)
+            raise RuntimeError("NoBrand HY2 restart failed after client overlay; config rolled back")
+
+        return True
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        try:
+            os.unlink(backup)
+        except FileNotFoundError:
+            pass
+
+
+def reconcile_hy2_node(node: dict[str, Any] | None) -> list[dict[str, Any]]:
+    owner = load_hy2_owner()
+    state = load_json_object(NOBRAND_HY2_STATE_FILE, "NoBrand HY2 state")
+    config = load_json_object(NOBRAND_HY2_CONFIG_FILE, "NoBrand HY2 config")
+
+    if node is None:
+        if owner is not None:
+            remove_owned_hy2_runtime()
+        return []
+
+    node_id = int(node.get("id") or 0)
+    if node_id <= 0:
+        raise RuntimeError("NoBrand HY2 node id is invalid")
+
+    desired = desired_users(node)
+    users = list(desired.values())
+
+    if owner is not None and int(owner["node_id"]) != node_id:
+        raise RuntimeError("another Xboard HY2 logical node owns this machine runtime")
+
+    if not users:
+        if owner is not None:
+            remove_owned_hy2_runtime()
+        return []
+
+    if owner is None and (state is not None or config is not None):
+        raise RuntimeError(
+            "an unmanaged NoBrand Hysteria2 runtime already exists; remove it before Xboard takeover"
+        )
+
+    installed_here = False
+    try:
+        if owner is None:
+            install_hy2_runtime(node)
+            installed_here = True
+            state = load_json_object(NOBRAND_HY2_STATE_FILE, "NoBrand HY2 state")
+            config = load_json_object(NOBRAND_HY2_CONFIG_FILE, "NoBrand HY2 config")
+        elif state is None or config is None or not hy2_state_matches_node(node, state):
+            install_hy2_runtime(node)
+            state = load_json_object(NOBRAND_HY2_STATE_FILE, "NoBrand HY2 state")
+            config = load_json_object(NOBRAND_HY2_CONFIG_FILE, "NoBrand HY2 config")
+
+        if state is None or config is None:
+            raise RuntimeError("NoBrand HY2 install completed without state/config")
+
+        apply_hy2_multiclient_overlay(users)
+        save_hy2_owner(node_id)
+
+    except Exception:
+        if installed_here:
+            run_nb(["hy2", "remove", "-y"], allow_fail=True)
+            clear_hy2_owner()
+        raise
+
+    state = load_json_object(NOBRAND_HY2_STATE_FILE, "NoBrand HY2 state")
+    if state is None:
+        raise RuntimeError("NoBrand HY2 state disappeared after reconciliation")
+
+    wanted = hy2_node_parameters(node)
+    display_host = str(state.get("advertise_host") or wanted["display_host"])
+    display_port = int(state.get("advertise_port") or state.get("listen_port") or wanted["port"])
+    sni = str(state.get("sni") or wanted["sni"])
+    obfs = str(state.get("obfs") or "")
+
+    if not display_host or not 1 <= display_port <= 65535 or not sni or not obfs:
+        raise RuntimeError("NoBrand HY2 state has incomplete client endpoint metadata")
+
+    bindings: list[dict[str, Any]] = []
+    for name, user in desired.items():
+        bindings.append({
+            "node_id": node_id,
+            "user_id": int(user["user_id"]),
+            "remote_user": name,
+            "instance_id": f"hy2:{node_id}",
+            "display_host": display_host,
+            "display_port": display_port,
+            "transport": "UDP",
+            "enabled": True,
+            "runtime_meta": {
+                "shared_listener": True,
+                "sni": sni,
+                "obfs": obfs,
+                "alpn": ["h3"],
+                "insecure": True,
+                "runtime_version": state.get("runtime_version"),
+                "updated_at": state.get("updated_at"),
+            },
+        })
+
+    return bindings
+
+
 def runtime_settings(node: dict[str, Any]) -> dict[str, Any]:
     value = node.get("runtime_driver_settings")
     return value if isinstance(value, dict) else {}
@@ -407,6 +718,9 @@ def desired_users(node: dict[str, Any]) -> dict[str, dict[str, Any]]:
             match = MANAGED_SNELL_RE.fullmatch(name)
             if not match or int(match.group(1)) != expected_node_id:
                 raise RuntimeError("panel returned an invalid reserved Snell instance name")
+        elif node_type == "hysteria":
+            if name != f"xbh{int(item.get('user_id') or 0)}":
+                raise RuntimeError("panel returned an invalid reserved Hysteria2 client name")
         else:
             raise RuntimeError(f"unsupported desired user protocol: {node_type}")
 
