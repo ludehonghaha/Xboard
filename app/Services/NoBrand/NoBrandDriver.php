@@ -43,10 +43,10 @@ final class NoBrandDriver
      */
     public const PANEL_RUNTIME_TYPES = [
         'mieru',
-        'hysteria',
-        'tuic',
-        'vless',
     ];
+
+    public const COMPANION_VERSION = '0.2.0';
+    public const COMPANION_INSTALLER_URL = 'https://raw.githubusercontent.com/ludehonghaha/Xboard/xboard-lite-v1/agents/nobrand/install.sh';
 
     /**
      * Structured allow-list. The agent must map these actions to fixed CLI
@@ -113,8 +113,10 @@ final class NoBrandDriver
             'vendored' => false,
             'execution_model' => 'structured-local-agent-actions',
             'companion_required' => true,
-            'companion_implemented' => false,
-            'phase' => 1,
+            'companion_implemented' => true,
+            'companion_version' => self::COMPANION_VERSION,
+            'implemented_runtime_protocols' => self::PANEL_RUNTIME_TYPES,
+            'phase' => 2,
         ];
     }
 
@@ -129,6 +131,21 @@ final class NoBrandDriver
      * Exact, checksum-pinned manager bootstrap.
      * The caller should run this locally on the target machine as root.
      */
+    public static function companionBootstrapCommand(string $panelUrl, int $machineId, string $token): string
+    {
+        if ($machineId <= 0) {
+            throw new InvalidArgumentException('machineId must be positive');
+        }
+
+        return sprintf(
+            'curl -fsSL %s | sudo bash -s -- --panel %s --machine-id %d --token %s',
+            escapeshellarg(self::COMPANION_INSTALLER_URL),
+            escapeshellarg(rtrim($panelUrl, '/')),
+            $machineId,
+            escapeshellarg($token)
+        );
+    }
+
     public static function managerBootstrapCommand(): string
     {
         $url = escapeshellarg(self::installerUrl());
