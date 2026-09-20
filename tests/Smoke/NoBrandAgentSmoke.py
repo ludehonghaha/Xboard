@@ -253,3 +253,23 @@ assert_equal(
 )
 
 print("[PASS] Snell meter accumulation smoke tests")
+
+
+ruleset = agent.render_snell_nft_meter_ruleset({
+    "s1111111111111111": 4904,
+    "s2222222222222222": 4905,
+})
+for token in [
+    "table inet xboard_nobrand_meter",
+    "counter xboard_owner_v1",
+    "counter s1111111111111111_up",
+    "counter s1111111111111111_down",
+    "ct state established tcp dport 4904 counter name s1111111111111111_up",
+    "ct state established tcp sport 4904 counter name s1111111111111111_down",
+    "ct state established tcp dport 4905 counter name s2222222222222222_up",
+    "ct state established tcp sport 4905 counter name s2222222222222222_down",
+]:
+    if token not in ruleset:
+        raise SystemExit(f"[FAIL] Snell nft ruleset missing token: {token}")
+
+print("[PASS] Snell nft ruleset render smoke tests")
