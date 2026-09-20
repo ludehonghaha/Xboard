@@ -104,12 +104,14 @@ class RegisterServiceTest extends TestCase
 
     private function createInvite(string $code): InviteCode
     {
-        return InviteCode::query()->create([
-            'user_id' => $this->issuer->id,
-            'code' => $code,
-            'status' => InviteCode::STATUS_UNUSED,
-            'pv' => 0,
-        ]);
+        $invite = new InviteCode();
+        $invite->user_id = $this->issuer->id;
+        $invite->code = $code;
+        $invite->status = InviteCode::STATUS_UNUSED;
+        $invite->pv = 0;
+        $invite->save();
+
+        return $invite;
     }
 
     private function makeRequest(array $overrides = []): Request
