@@ -47,3 +47,9 @@ jobs:
           Path("/tmp/xboard-lite-admin.js").write_text(js, encoding="utf-8")
           PY
           node --check /tmp/xboard-lite-admin.js
+
+      - name: Smoke NoBrand traffic watermark
+        shell: bash
+        run: |
+          set -euo pipefail
+          php tests/Smoke/NoBrandTrafficWatermarkSmoke.php
