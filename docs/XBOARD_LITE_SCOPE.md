@@ -122,13 +122,16 @@ User filtering and sorting use a Lite allow-list so removed financial/referral f
 
 ## NoBrand Hybrid Agent
 
-Xboard Lite has a Phase 1 external-driver contract for `ike-sh/NoBrand-OneClick`.
+Xboard Lite has a Phase 2 external runtime integration for `ike-sh/NoBrand-OneClick`.
 
 - Upstream GPL source is not vendored into Xboard Lite.
-- The panel pins an exact upstream release and SHA-256.
+- The panel pins NoBrand v3.2.2 and verifies the release installer SHA-256.
 - Machines distinguish `xboard-node` from `nobrand-hybrid`.
 - Nodes distinguish `native` from `nobrand` runtime ownership.
 - Native machine discovery excludes NoBrand-owned nodes to avoid double ownership.
-- The NoBrand companion that executes local allow-listed CLI actions is not implemented yet.
+- The Xboard-owned companion is stored under `agents/nobrand/` and invokes only structured local `nobrand` actions.
+- Phase 2 implements NoBrand Mieru dedicated-user reconciliation and per-user endpoint bindings.
+- A NoBrand Mieru endpoint is hidden from subscription output until the companion has reported that user's real isolated-instance port.
+- NoBrand traffic-quota mirroring is intentionally deferred until traffic accounting can be reconciled safely.
 
 See [NOBRAND_AGENT_DRIVER.md](NOBRAND_AGENT_DRIVER.md).
