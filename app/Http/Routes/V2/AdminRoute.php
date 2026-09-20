@@ -112,6 +112,7 @@ class AdminRoute
             ], function ($router) {
                 $router->get('/getOverride', [StatController::class, 'getOverride']);
                 $router->get('/getStats', [StatController::class, 'getStats']);
+                $router->get('/liteDashboard', [StatController::class, 'liteDashboard']);
                 // Compatibility stub: returns empty commerce stats in Lite.
                 $router->get('/getOrder', [StatController::class, 'getOrder']);
                 $router->get('/getServerLastRank', [StatController::class, 'getServerLastRank']);
