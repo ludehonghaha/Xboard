@@ -88,6 +88,7 @@ class AdminRoute
                 $router->post('/resetToken', [MachineController::class, 'resetToken']);
                 $router->get('/getToken', [MachineController::class, 'getToken']);
                 $router->get('/installCommand', [MachineController::class, 'installCommand']);
+                $router->get('/nobrandCapabilities', [MachineController::class, 'nobrandCapabilities']);
                 $router->get('/nodes', [MachineController::class, 'nodes']);
                 $router->get('/history', [MachineController::class, 'history']);
             });
