@@ -45,9 +45,10 @@ final class NoBrandDriver
         'mieru',
         'snell',
         'hysteria',
+        'tuic',
     ];
 
-    public const COMPANION_VERSION = '0.5.0';
+    public const COMPANION_VERSION = '0.6.0';
     public const COMPANION_INSTALLER_URL = 'https://raw.githubusercontent.com/ludehonghaha/Xboard/xboard-lite-v1/agents/nobrand/install.sh';
 
     /**
@@ -118,7 +119,7 @@ final class NoBrandDriver
             'companion_implemented' => true,
             'companion_version' => self::COMPANION_VERSION,
             'implemented_runtime_protocols' => self::PANEL_RUNTIME_TYPES,
-            'phase' => 5,
+            'phase' => 6,
         ];
     }
 
