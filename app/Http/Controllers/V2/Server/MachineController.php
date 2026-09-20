@@ -62,7 +62,7 @@ class MachineController extends Controller
             ->map(function (Server $node) {
                 $desiredUsers = [];
 
-                if ($node->type === Server::TYPE_MIERU) {
+                if (in_array($node->type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)) {
                     $available = ServerService::getAvailableUsers($node);
                     $userIds = $available->pluck('id')->map(fn ($id) => (int) $id)->all();
 
@@ -74,20 +74,21 @@ class MachineController extends Controller
                             ->keyBy('id');
 
                     $desiredUsers = $available
-                        ->map(function ($user) use ($details) {
+                        ->map(function ($user) use ($details, $node) {
                             $detail = $details->get((int) $user->id);
                             $expiredAt = $detail?->expired_at;
+                            $userId = (int) $user->id;
 
                             return [
-                                'user_id' => (int) $user->id,
-                                'remote_user' => 'xb' . (int) $user->id,
-                                // Companion uses the existing Xboard UUID as the
-                                // NoBrand password; it must never log this value.
+                                'user_id' => $userId,
+                                'remote_user' => $node->type === Server::TYPE_SNELL
+                                    ? 'xbn' . (int) $node->id . 'u' . $userId
+                                    : 'xb' . $userId,
+                                // Mieru password / Snell PSK reuse the existing
+                                // Xboard UUID. Companion must never log it.
                                 'password' => (string) $user->uuid,
                                 'bandwidth_mbps' => max(0, (int) ($detail?->speed_limit ?? 0)),
                                 'expire' => $expiredAt ? date('Y-m-d', (int) $expiredAt) : '0',
-                                // Quota remains panel-owned until NoBrand traffic
-                                // accounting is reported back to Xboard.
                                 'quota_mb' => 0,
                                 'quota_days' => 0,
                                 'enabled' => true,
@@ -155,7 +156,7 @@ class MachineController extends Controller
         $nodes = Server::query()
             ->where('machine_id', $machine->id)
             ->where('runtime_driver', 'nobrand')
-            ->where('type', Server::TYPE_MIERU)
+            ->whereIn('type', [Server::TYPE_MIERU, Server::TYPE_SNELL])
             ->whereIn('id', $nodeIds)
             ->get()
             ->keyBy('id');
