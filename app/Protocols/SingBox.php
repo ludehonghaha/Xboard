@@ -20,7 +20,6 @@ class SingBox extends AbstractProtocol
         Server::TYPE_ANYTLS,
         Server::TYPE_SOCKS,
         Server::TYPE_HTTP,
-        Server::TYPE_SNELL,
     ];
     private $config;
     const CUSTOM_TEMPLATE_FILE = 'resources/rules/custom.sing-box.json';
@@ -177,9 +176,6 @@ class SingBox extends AbstractProtocol
             if ($item['type'] === Server::TYPE_HTTP) {
                 $httpConfig = $this->buildHttp($this->user['uuid'], $item);
                 $proxies[] = $httpConfig;
-            }
-            if ($item['type'] === Server::TYPE_SNELL) {
-                $proxies[] = $this->buildSnell($item['password'], $item);
             }
         }
         foreach ($outbounds as &$outbound) {
@@ -745,7 +741,7 @@ class SingBox extends AbstractProtocol
             'server_port' => $server['port'],
             'congestion_control' => data_get($protocol_settings, 'congestion_control', 'cubic'),
             'udp_relay_mode' => data_get($protocol_settings, 'udp_relay_mode', 'native'),
-            'zero_rtt_handshake' => (bool) data_get($server, 'runtime_binding.zero_rtt_handshake', data_get($server, 'runtime_driver') === 'nobrand' ? false : true),
+            'zero_rtt_handshake' => true,
             'heartbeat' => '10s',
             'tls' => [
                 'enabled' => true,
@@ -762,8 +758,8 @@ class SingBox extends AbstractProtocol
         if (data_get($protocol_settings, 'version') === 4) {
             $array['token'] = $password;
         } else {
-            $array['uuid'] = data_get($server, 'runtime_binding.uuid', $password);
-            $array['password'] = data_get($server, 'runtime_binding.password', data_get($server, 'password', $password));
+            $array['uuid'] = $password;
+            $array['password'] = $password;
         }
 
         return $array;
@@ -791,22 +787,6 @@ class SingBox extends AbstractProtocol
         $this->appendEch($array['tls'], data_get($protocol_settings, 'tls.ech'));
 
         return $array;
-    }
-
-    protected function buildSnell($password, $server): array
-    {
-        $major = (int) data_get($server, 'protocol_settings.version', 5);
-
-        return [
-            'type' => 'snell',
-            'tag' => $server['name'],
-            'server' => $server['host'],
-            'server_port' => (int) $server['port'],
-            // sing-box currently expresses the v5 non-QUIC compatible wire
-            // format using outbound version 4, matching NoBrand's exporter.
-            'version' => $major === 5 ? 4 : $major,
-            'psk' => data_get($server, 'password', $password),
-        ];
     }
 
     protected function buildSocks($password, $server): array
