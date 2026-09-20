@@ -125,9 +125,10 @@ class MachineController extends Controller
     /**
      * Report reconciled NoBrand per-user endpoints.
      *
-     * Passwords are intentionally not accepted here. The panel remains the
-     * authority for user credentials; the companion may only report runtime
-     * identity and endpoint metadata.
+     * Xboard remains authoritative for credentials where the protocol allows
+     * it (Mieru/HY2/Snell). TUIC v5 is different: NoBrand generates each
+     * user's UUID/password, so those generated credentials are accepted only
+     * for TUIC bindings and are encrypted at rest.
      */
     public function nobrandBindings(Request $request): JsonResponse
     {
@@ -150,6 +151,9 @@ class MachineController extends Controller
             'bindings.*.transport' => 'required|string|in:TCP,UDP,BOTH',
             'bindings.*.enabled' => 'nullable|boolean',
             'bindings.*.runtime_meta' => 'nullable|array',
+            'bindings.*.credentials' => 'nullable|array',
+            'bindings.*.credentials.uuid' => 'nullable|string|max:64',
+            'bindings.*.credentials.password' => 'nullable|string|max:256',
         ]);
 
         $nodeIds = collect($params['node_ids'])
@@ -163,7 +167,7 @@ class MachineController extends Controller
             : Server::query()
                 ->where('machine_id', $machine->id)
                 ->where('runtime_driver', 'nobrand')
-                ->whereIn('type', [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA])
+                ->whereIn('type', [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC])
                 ->whereIn('id', $nodeIds)
                 ->get()
                 ->keyBy('id');
@@ -189,9 +193,29 @@ class MachineController extends Controller
             }
         }
 
+        foreach ($params['bindings'] as $binding) {
+            $node = $nodes->get((int) $binding['node_id']);
+            $credentials = $binding['credentials'] ?? null;
+
+            if ($node?->type === Server::TYPE_TUIC) {
+                $uuid = (string) data_get($credentials, 'uuid', '');
+                $password = (string) data_get($credentials, 'password', '');
+
+                if (
+                    !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $uuid)
+                    || $password === ''
+                    || mb_strlen($password) > 256
+                ) {
+                    abort(422, 'TUIC binding is missing valid generated credentials');
+                }
+            } elseif ($credentials !== null) {
+                abort(422, 'Generated credentials are accepted only for TUIC bindings');
+            }
+        }
+
         $syncedAt = now()->timestamp;
 
-        DB::transaction(function () use ($params, $nodeIds, $syncedAt) {
+        DB::transaction(function () use ($params, $nodeIds, $nodes, $syncedAt) {
             $bindingsByNode = collect($params['bindings'])->groupBy(
                 fn ($binding) => (int) $binding['node_id']
             );
@@ -233,7 +257,8 @@ class MachineController extends Controller
                 // or rewind this value through the binding endpoint.
                 unset($reportedMeta['traffic_watermark']);
 
-                $record->fill([
+                $node = $nodes->get((int) $binding['node_id']);
+                $payload = [
                     'remote_user' => $binding['remote_user'],
                     'instance_id' => $binding['instance_id'] ?? null,
                     'display_host' => $binding['display_host'] ?? null,
@@ -242,8 +267,18 @@ class MachineController extends Controller
                     'enabled' => (bool) ($binding['enabled'] ?? true),
                     'runtime_meta' => array_merge($existingMeta, $reportedMeta),
                     'last_synced_at' => $syncedAt,
-                ]);
+                ];
 
+                if ($node?->type === Server::TYPE_TUIC) {
+                    $payload['credential_payload'] = [
+                        'uuid' => (string) data_get($binding, 'credentials.uuid'),
+                        'password' => (string) data_get($binding, 'credentials.password'),
+                    ];
+                } else {
+                    $payload['credential_payload'] = null;
+                }
+
+                $record->fill($payload);
                 $record->save();
             }
         });
