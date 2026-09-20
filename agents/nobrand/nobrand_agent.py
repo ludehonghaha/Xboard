@@ -1591,6 +1591,7 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
         "traffic_readings": len(traffic_readings),
         "snell_meter_mode": snell_meter_mode,
         "snell_meter_readings": len(snell_meter_totals_map),
+        "hy2_clients": len(hy2_bindings),
     }
 
 
@@ -1613,6 +1614,7 @@ def report_status(
         "traffic_readings": int(stats.get("traffic_readings", 0)),
         "snell_meter_mode": str(stats.get("snell_meter_mode") or cfg.snell_meter),
         "snell_meter_readings": int(stats.get("snell_meter_readings", 0)),
+        "hy2_clients": int(stats.get("hy2_clients", 0)),
         "reconcile_ms": max(0, int(reconcile_ms)),
     }
     api_post(cfg, "/api/v2/server/machine/nobrand-status", payload)
