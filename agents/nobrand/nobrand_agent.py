@@ -36,7 +36,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 MANAGED_USER_RE = re.compile(r"^xb[1-9][0-9]*$")
 MANAGED_SNELL_RE = re.compile(r"^xbn([1-9][0-9]*)u([1-9][0-9]*)$")
 ALLOWED_TRANSPORTS = {"TCP", "UDP"}
@@ -56,6 +56,8 @@ NOBRAND_HY2_STATE_FILE = "/var/lib/nobrand-oneclick/hysteria2/state.json"
 NOBRAND_XRAY_BIN = "/usr/local/lib/nobrand-oneclick/bin/xray"
 NOBRAND_XRAY_ASSET_DIR = "/usr/local/lib/nobrand-oneclick/xray-assets"
 HY2_OWNER_FILE = "/var/lib/xboard-nobrand-agent/hy2-owner.json"
+NOBRAND_TUIC_STATE_DIR = "/var/lib/nobrand-oneclick/tuic/instances"
+TUIC_OWNER_FILE = "/var/lib/xboard-nobrand-agent/tuic-owners.json"
 
 STOP = False
 
@@ -734,6 +736,9 @@ def desired_users(node: dict[str, Any]) -> dict[str, dict[str, Any]]:
         elif node_type == "hysteria":
             if name != f"xbh{int(item.get('user_id') or 0)}":
                 raise RuntimeError("panel returned an invalid reserved Hysteria2 client name")
+        elif node_type == "tuic":
+            if name != f"xbu{int(item.get('user_id') or 0)}":
+                raise RuntimeError("panel returned an invalid reserved TUIC user name")
         else:
             raise RuntimeError(f"unsupported desired user protocol: {node_type}")
 
@@ -1292,6 +1297,344 @@ def sync_snell_nft_meter(
 def snell_platform_supported() -> bool:
     machine = os.uname().machine.lower()
     return machine in {"x86_64", "amd64", "aarch64", "arm64"}
+
+
+def load_tuic_states() -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    if not os.path.isdir(NOBRAND_TUIC_STATE_DIR):
+        return result
+
+    for instance_dir in os.scandir(NOBRAND_TUIC_STATE_DIR):
+        if not instance_dir.is_dir(follow_symlinks=False):
+            continue
+
+        instance_id = instance_dir.name
+        if not re.fullmatch(r"t[0-9a-f]{16}", instance_id):
+            continue
+
+        state_path = os.path.join(instance_dir.path, "state.json")
+        state = load_json_object(state_path, f"TUIC state {instance_id}")
+        if state is None:
+            continue
+        if (
+            state.get("schema_version") != 3
+            or state.get("ownership") != "nobrand-v3"
+            or state.get("protocol") != "tuic"
+            or int(state.get("tuic_version") or 0) != 5
+            or str(state.get("instance_id") or "") != instance_id
+        ):
+            continue
+
+        name = str(state.get("name") or "")
+        if not name:
+            continue
+        result[name] = state
+
+    return result
+
+
+def load_tuic_owners() -> dict[str, dict[str, Any]]:
+    payload = load_json_object(TUIC_OWNER_FILE, "TUIC owner state")
+    if payload is None:
+        return {}
+    if int(payload.get("version") or 0) != 1:
+        raise RuntimeError("TUIC owner state version is invalid")
+    owners = payload.get("owners")
+    if not isinstance(owners, dict):
+        raise RuntimeError("TUIC owner map is invalid")
+    return {
+        str(key): value
+        for key, value in owners.items()
+        if isinstance(value, dict)
+    }
+
+
+def save_tuic_owners(owners: dict[str, dict[str, Any]]) -> None:
+    save_root_json(TUIC_OWNER_FILE, {
+        "version": 1,
+        "managed_by": "xboard-nobrand-agent",
+        "owners": owners,
+        "updated_at": int(time.time()),
+    })
+
+
+def tuic_instance_name(node_id: int) -> str:
+    if node_id <= 0:
+        raise RuntimeError("invalid TUIC node id")
+    return f"xbt{node_id}"
+
+
+def tuic_user_name(user_id: int) -> str:
+    if user_id <= 0:
+        raise RuntimeError("invalid TUIC user id")
+    return f"xbu{user_id}"
+
+
+def tuic_node_parameters(node: dict[str, Any]) -> dict[str, Any]:
+    protocol = node.get("protocol_settings")
+    if not isinstance(protocol, dict):
+        protocol = {}
+    tls = protocol.get("tls")
+    if not isinstance(tls, dict):
+        tls = {}
+
+    node_id = int(node.get("id") or 0)
+    port = int(node.get("server_port") or 0)
+    sni = str(tls.get("server_name") or "").strip()
+    display_host = str(runtime_settings(node).get("advertise_host") or node.get("host") or "").strip()
+    ingress = str(runtime_settings(node).get("ingress_profile") or "").strip()
+
+    if node_id <= 0:
+        raise RuntimeError("NoBrand TUIC node id is invalid")
+    if not 1025 <= port <= 65535:
+        raise RuntimeError("NoBrand TUIC requires server_port 1025-65535")
+    if not sni or len(sni) > 255:
+        raise RuntimeError("NoBrand TUIC requires a valid SNI")
+    if not display_host or len(display_host) > 255:
+        raise RuntimeError("NoBrand TUIC requires a display host")
+
+    return {
+        "name": tuic_instance_name(node_id),
+        "port": port,
+        "sni": sni,
+        "display_host": display_host,
+        "ingress_profile": ingress,
+    }
+
+
+def tuic_state_matches_node(node: dict[str, Any], state: dict[str, Any]) -> bool:
+    wanted = tuic_node_parameters(node)
+    if state.get("protocol") != "tuic" or int(state.get("tuic_version") or 0) != 5:
+        return False
+    if not bool(state.get("enabled", True)):
+        return False
+    if str(state.get("name") or "") != wanted["name"]:
+        return False
+    if int(state.get("listen_port") or 0) != wanted["port"]:
+        return False
+    if str(state.get("sni") or "") != wanted["sni"]:
+        return False
+    if str(state.get("advertise_host") or "") != wanted["display_host"]:
+        return False
+    if int(state.get("advertise_port") or 0) != wanted["port"]:
+        return False
+    return True
+
+
+def tuic_owner_spec(node: dict[str, Any]) -> dict[str, Any]:
+    return tuic_node_parameters(node)
+
+
+def install_tuic_instance(node: dict[str, Any], first_user: dict[str, Any]) -> None:
+    wanted = tuic_node_parameters(node)
+    args = [
+        "tuic", "install",
+        "--name", wanted["name"],
+        "--user", str(first_user["remote_user"]),
+        "--sni", wanted["sni"],
+        "--port", str(wanted["port"]),
+        "--advertise-host", wanted["display_host"],
+        "--advertise-port", str(wanted["port"]),
+        "-y",
+    ]
+    if wanted["ingress_profile"]:
+        args.extend(["--ingress-profile", wanted["ingress_profile"]])
+    run_nb(args)
+    log(f"installed managed TUIC v5 instance {wanted['name']}")
+
+
+def remove_tuic_instance(name: str) -> None:
+    if not re.fullmatch(r"xbt[1-9][0-9]*", name):
+        raise RuntimeError("refusing to remove non-Xboard TUIC instance")
+    run_nb(["tuic", "uninstall", "--name", name, "-y"])
+    log(f"removed managed TUIC v5 instance {name}")
+
+
+def add_tuic_user(instance_name: str, user_name: str) -> None:
+    if not re.fullmatch(r"xbt[1-9][0-9]*", instance_name):
+        raise RuntimeError("invalid Xboard TUIC instance name")
+    if not re.fullmatch(r"xbu[1-9][0-9]*", user_name):
+        raise RuntimeError("invalid Xboard TUIC user name")
+    run_nb(["tuic", "user", "add", "--name", instance_name, "--user", user_name, "-y"])
+    log(f"added managed TUIC user {user_name} to {instance_name}")
+
+
+def delete_tuic_user(instance_name: str, user_name: str) -> None:
+    if not re.fullmatch(r"xbt[1-9][0-9]*", instance_name):
+        raise RuntimeError("invalid Xboard TUIC instance name")
+    if not re.fullmatch(r"xbu[1-9][0-9]*", user_name):
+        raise RuntimeError("invalid Xboard TUIC user name")
+    run_nb(["tuic", "user", "delete", "--name", instance_name, "--user", user_name, "-y"])
+    log(f"removed managed TUIC user {user_name} from {instance_name}")
+
+
+def tuic_users_by_name(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    users = state.get("users")
+    if not isinstance(users, list):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for item in users:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        if name:
+            result[name] = item
+    return result
+
+
+def reconcile_tuic_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    owners = load_tuic_owners()
+    states = load_tuic_states()
+    desired_node_ids = {str(int(node["id"])) for node in nodes}
+
+    # Remove only instances proven to be Xboard-owned by our local owner map.
+    for node_key in sorted(list(owners)):
+        if node_key in desired_node_ids:
+            continue
+        owner = owners[node_key]
+        name = str(owner.get("name") or "")
+        instance_id = str(owner.get("instance_id") or "")
+        state = states.get(name)
+        if state is not None and str(state.get("instance_id") or "") != instance_id:
+            raise RuntimeError(f"TUIC ownership mismatch for {name}")
+        if state is not None:
+            remove_tuic_instance(name)
+        owners.pop(node_key, None)
+
+    bindings: list[dict[str, Any]] = []
+
+    for node in nodes:
+        node_id = int(node["id"])
+        key = str(node_id)
+        wanted = tuic_node_parameters(node)
+        desired = desired_users(node)
+        desired_names = set(desired)
+        owner = owners.get(key)
+        state = states.get(wanted["name"])
+
+        if not desired:
+            if owner is not None:
+                expected_id = str(owner.get("instance_id") or "")
+                if state is not None and str(state.get("instance_id") or "") != expected_id:
+                    raise RuntimeError(f"TUIC ownership mismatch for {wanted['name']}")
+                if state is not None:
+                    remove_tuic_instance(wanted["name"])
+                owners.pop(key, None)
+            continue
+
+        if owner is None and state is not None:
+            raise RuntimeError(
+                f"unowned NoBrand TUIC instance {wanted['name']} already exists"
+            )
+
+        if owner is not None:
+            if str(owner.get("name") or "") != wanted["name"]:
+                raise RuntimeError("TUIC owner name mismatch")
+            if owner.get("node_spec") != tuic_owner_spec(node):
+                raise RuntimeError(
+                    f"TUIC core settings changed for {wanted['name']}; delete/recreate the logical node"
+                )
+            if state is not None and str(state.get("instance_id") or "") != str(owner.get("instance_id") or ""):
+                raise RuntimeError(f"TUIC ownership mismatch for {wanted['name']}")
+
+        if state is None:
+            first_name = sorted(desired_names)[0]
+            install_tuic_instance(node, desired[first_name])
+            states = load_tuic_states()
+            state = states.get(wanted["name"])
+            if state is None:
+                raise RuntimeError(f"TUIC install completed but state is unavailable for {wanted['name']}")
+            owners[key] = {
+                "name": wanted["name"],
+                "instance_id": str(state.get("instance_id") or ""),
+                "node_spec": tuic_owner_spec(node),
+            }
+        elif not tuic_state_matches_node(node, state):
+            raise RuntimeError(
+                f"TUIC runtime drift detected for {wanted['name']}; refusing destructive automatic recreation"
+            )
+
+        current_users = tuic_users_by_name(state)
+
+        # Add all missing Xboard users first, so deleting obsolete users can
+        # never violate NoBrand's "at least one TUIC user" invariant.
+        for user_name in sorted(desired_names):
+            if user_name not in current_users:
+                add_tuic_user(wanted["name"], user_name)
+
+        states = load_tuic_states()
+        state = states.get(wanted["name"])
+        if state is None:
+            raise RuntimeError(f"TUIC state disappeared for {wanted['name']}")
+        current_users = tuic_users_by_name(state)
+
+        for user_name in sorted(current_users):
+            if re.fullmatch(r"xbu[1-9][0-9]*", user_name) and user_name not in desired_names:
+                delete_tuic_user(wanted["name"], user_name)
+
+        states = load_tuic_states()
+        state = states.get(wanted["name"])
+        if state is None:
+            raise RuntimeError(f"TUIC state disappeared after user reconciliation for {wanted['name']}")
+        current_users = tuic_users_by_name(state)
+
+        instance_id = str(state.get("instance_id") or "")
+        display_host = str(state.get("advertise_host") or wanted["display_host"])
+        display_port = int(state.get("advertise_port") or state.get("listen_port") or wanted["port"])
+        sni = str(state.get("sni") or wanted["sni"])
+
+        if (
+            not re.fullmatch(r"t[0-9a-f]{16}", instance_id)
+            or not display_host
+            or not 1 <= display_port <= 65535
+            or not sni
+        ):
+            raise RuntimeError(f"TUIC state has incomplete endpoint metadata for {wanted['name']}")
+
+        for user_name, wanted_user in desired.items():
+            current = current_users.get(user_name)
+            if current is None:
+                raise RuntimeError(f"TUIC user {user_name} is missing after reconciliation")
+
+            user_uuid = str(current.get("uuid") or "")
+            password = str(current.get("password") or "")
+            if (
+                not re.fullmatch(
+                    r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                    user_uuid,
+                )
+                or not password
+            ):
+                raise RuntimeError(f"TUIC generated credentials are invalid for {user_name}")
+
+            bindings.append({
+                "node_id": node_id,
+                "user_id": int(wanted_user["user_id"]),
+                "remote_user": user_name,
+                "instance_id": instance_id,
+                "display_host": display_host,
+                "display_port": display_port,
+                "transport": "UDP",
+                "enabled": True,
+                "credentials": {
+                    "uuid": user_uuid,
+                    "password": password,
+                },
+                "runtime_meta": {
+                    "shared_listener": True,
+                    "sni": sni,
+                    "alpn": ["h3"],
+                    "insecure": True,
+                    "congestion_control": "cubic",
+                    "udp_relay_mode": "native",
+                    "zero_rtt_handshake": False,
+                    "runtime_version": state.get("runtime_version"),
+                    "updated_at": state.get("updated_at"),
+                },
+            })
+
+    save_tuic_owners(owners)
+    return bindings
 
 
 def load_snell_states() -> dict[str, dict[str, Any]]:
