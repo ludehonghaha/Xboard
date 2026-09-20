@@ -187,6 +187,7 @@ class ServerService
                         $server->runtime_binding['uuid'] = $uuid;
                         $server->runtime_binding['password'] = $password;
                         $server->runtime_binding['user_name'] = $binding->remote_user;
+                        $server->runtime_binding['zero_rtt_handshake'] = (bool) ($meta['zero_rtt_handshake'] ?? false);
                     }
                 } else {
                     // 判断动态端口
