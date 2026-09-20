@@ -693,9 +693,9 @@ class ClashMeta extends AbstractProtocol
             'type' => 'mieru',
             'server' => $server['host'],
             'port' => $server['port'],
-            'username' => $password,
-            'password' => $password,
-            'transport' => strtoupper(data_get($protocol_settings, 'transport', 'TCP'))
+            'username' => data_get($server, 'username', $password),
+            'password' => data_get($server, 'password', $password),
+            'transport' => strtoupper(data_get($server, 'runtime_binding.transport', data_get($protocol_settings, 'transport', 'TCP')))
         ];
 
         // 如果配置了端口范围
