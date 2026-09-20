@@ -335,6 +335,8 @@ class MachineController extends Controller
             'managed_users' => 'nullable|integer|min:0|max:1000000',
             'bindings' => 'nullable|integer|min:0|max:1000000',
             'traffic_readings' => 'nullable|integer|min:0|max:1000000',
+            'snell_meter_mode' => 'nullable|string|in:off,nft',
+            'snell_meter_readings' => 'nullable|integer|min:0|max:1000000',
             'reconcile_ms' => 'nullable|integer|min:0|max:3600000',
         ]);
 
@@ -348,6 +350,8 @@ class MachineController extends Controller
                 'managed_users' => (int) ($params['managed_users'] ?? 0),
                 'bindings' => (int) ($params['bindings'] ?? 0),
                 'traffic_readings' => (int) ($params['traffic_readings'] ?? 0),
+                'snell_meter_mode' => (string) ($params['snell_meter_mode'] ?? 'off'),
+                'snell_meter_readings' => (int) ($params['snell_meter_readings'] ?? 0),
                 'reconcile_ms' => (int) ($params['reconcile_ms'] ?? 0),
                 'updated_at' => $now,
             ],
