@@ -21,7 +21,6 @@ class General extends AbstractProtocol
         Server::TYPE_SOCKS,
         Server::TYPE_TUIC,
         Server::TYPE_HTTP,
-        Server::TYPE_MIERU,
     ];
 
     protected $protocolRequirements = [
@@ -46,7 +45,6 @@ class General extends AbstractProtocol
                 Server::TYPE_SOCKS => self::buildSocks($item['password'], $item),
                 Server::TYPE_TUIC => self::buildTuic($item['password'], $item),
                 Server::TYPE_HTTP => self::buildHttp($item['password'], $item),
-                Server::TYPE_MIERU => self::buildMieru($item['password'], $item),
                 default => '',
             };
         }
@@ -371,13 +369,6 @@ class General extends AbstractProtocol
 
     public static function buildTuic($password, $server)
     {
-        // NoBrand TUIC v5 deliberately follows the upstream exporter: there
-        // is no verified standardized v5 URI, so generic URI subscriptions
-        // omit these nodes instead of manufacturing an incompatible link.
-        if (data_get($server, 'runtime_driver') === 'nobrand') {
-            return '';
-        }
-
         $protocol_settings = data_get($server, 'protocol_settings', []);
         $name = rawurlencode($server['name']);
         $addr = Helper::wrapIPv6($server['host']);
@@ -431,45 +422,6 @@ class General extends AbstractProtocol
 
 
 
-
-    public static function buildMieru($password, $server)
-    {
-        $settings = data_get($server, 'runtime_driver_settings', []);
-        $protocolSettings = data_get($server, 'protocol_settings', []);
-
-        $username = rawurlencode((string) data_get($server, 'username', $password));
-        $password = rawurlencode((string) data_get($server, 'password', $password));
-        $host = Helper::wrapIPv6($server['host']);
-        $name = rawurlencode($server['name']);
-
-        $transport = strtoupper((string) data_get(
-            $server,
-            'runtime_binding.transport',
-            data_get($protocolSettings, 'transport', 'TCP')
-        ));
-
-        $query = [
-            'handshake-mode' => data_get($settings, 'handshake_mode', 'HANDSHAKE_NO_WAIT'),
-            'mtu' => (int) data_get($settings, 'mtu', 1400),
-            'multiplexing' => data_get($settings, 'multiplexing', 'MULTIPLEXING_OFF'),
-            'port' => (int) $server['port'],
-            'profile' => 'default',
-            'protocol' => $transport,
-        ];
-
-        if ($trafficPattern = data_get($protocolSettings, 'traffic_pattern')) {
-            $query['traffic-pattern'] = $trafficPattern;
-        }
-
-        return sprintf(
-            "mierus://%s:%s@%s?%s#%s\r\n",
-            $username,
-            $password,
-            $host,
-            http_build_query($query),
-            $name
-        );
-    }
 
     public static function buildAnyTLS($password, $server)
     {
