@@ -17,5 +17,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find app routes config database plugins-core -type f -name '*.php' -print0 \
+          find app routes config database plugins-core tests -type f -name '*.php' -print0 \
             | xargs -0 -n1 php -l
