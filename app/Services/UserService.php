@@ -248,4 +248,4 @@ class UserService
         return $user;
     }
 
-}}
+}
