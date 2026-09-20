@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\NoBrandUserBinding;
 use App\Models\Server;
 use App\Models\ServerMachine;
 use App\Models\ServerRoute;
@@ -87,19 +88,64 @@ class ServerService
             ->get()
             ->append(['last_check_at', 'last_push_at', 'online', 'is_online', 'available_status', 'cache_key', 'server_key']);
 
-        $servers = collect($servers)->map(function ($server) use ($user) {
-            // 判断动态端口
-            if (str_contains($server->port, '-')) {
-                $port = $server->port;
-                $server->port = (int) Helper::randomPort($port);
-                $server->ports = $port;
-            } else {
-                $server->port = (int) $server->port;
-            }
-            $server->password = $server->generateServerPassword($user);
-            $server->rate = $server->getCurrentRate();
-            return $server;
-        })->toArray();
+        $noBrandMieruIds = $servers
+            ->filter(fn (Server $server) =>
+                $server->runtime_driver === 'nobrand'
+                && $server->type === Server::TYPE_MIERU
+            )
+            ->pluck('id')
+            ->all();
+
+        $bindings = empty($noBrandMieruIds)
+            ? collect()
+            : NoBrandUserBinding::query()
+                ->where('user_id', $user->id)
+                ->whereIn('server_id', $noBrandMieruIds)
+                ->where('enabled', true)
+                ->get()
+                ->keyBy('server_id');
+
+        $servers = $servers
+            ->filter(function (Server $server) use ($bindings) {
+                if ($server->runtime_driver !== 'nobrand' || $server->type !== Server::TYPE_MIERU) {
+                    return true;
+                }
+
+                // A dedicated NoBrand Mieru user must not leak the node's
+                // generic port into a subscription before the agent reports
+                // the real per-user endpoint.
+                return $bindings->has($server->id);
+            })
+            ->map(function (Server $server) use ($user, $bindings) {
+                if ($server->runtime_driver === 'nobrand' && $server->type === Server::TYPE_MIERU) {
+                    /** @var NoBrandUserBinding $binding */
+                    $binding = $bindings->get($server->id);
+
+                    $server->host = $binding->display_host ?: $server->host;
+                    $server->port = (int) $binding->display_port;
+                    $server->username = $binding->remote_user;
+                    $server->password = $user->uuid;
+                    $server->runtime_binding = [
+                        'instance_id' => $binding->instance_id,
+                        'transport' => $binding->transport,
+                        'last_synced_at' => $binding->last_synced_at,
+                    ];
+                } else {
+                    // 判断动态端口
+                    if (str_contains((string) $server->port, '-')) {
+                        $port = $server->port;
+                        $server->port = (int) Helper::randomPort($port);
+                        $server->ports = $port;
+                    } else {
+                        $server->port = (int) $server->port;
+                    }
+                    $server->password = $server->generateServerPassword($user);
+                }
+
+                $server->rate = $server->getCurrentRate();
+                return $server;
+            })
+            ->toArray();
 
         return $servers;
     }
