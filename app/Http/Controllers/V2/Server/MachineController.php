@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\V2\Server;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessNoBrandTrafficReportJob;
+use App\Models\NoBrandTrafficReport;
 use App\Models\NoBrandUserBinding;
 use App\Models\Server;
 use App\Models\ServerMachine;
@@ -181,22 +183,33 @@ class MachineController extends Controller
 
         DB::transaction(function () use ($params, $syncedAt) {
             foreach ($params['bindings'] as $binding) {
-                NoBrandUserBinding::updateOrCreate(
-                    [
-                        'server_id' => (int) $binding['node_id'],
-                        'user_id' => (int) $binding['user_id'],
-                    ],
-                    [
-                        'remote_user' => $binding['remote_user'],
-                        'instance_id' => $binding['instance_id'] ?? null,
-                        'display_host' => $binding['display_host'] ?? null,
-                        'display_port' => (int) $binding['display_port'],
-                        'transport' => strtoupper($binding['transport']),
-                        'enabled' => (bool) ($binding['enabled'] ?? true),
-                        'runtime_meta' => $binding['runtime_meta'] ?? null,
-                        'last_synced_at' => $syncedAt,
-                    ]
-                );
+                $record = NoBrandUserBinding::query()->firstOrNew([
+                    'server_id' => (int) $binding['node_id'],
+                    'user_id' => (int) $binding['user_id'],
+                ]);
+
+                $existingMeta = is_array($record->runtime_meta) ? $record->runtime_meta : [];
+                $reportedMeta = is_array($binding['runtime_meta'] ?? null)
+                    ? $binding['runtime_meta']
+                    : [];
+
+                // The traffic watermark is panel-owned accounting state. The
+                // companion may report runtime metadata but cannot overwrite
+                // or rewind this value through the binding endpoint.
+                unset($reportedMeta['traffic_watermark']);
+
+                $record->fill([
+                    'remote_user' => $binding['remote_user'],
+                    'instance_id' => $binding['instance_id'] ?? null,
+                    'display_host' => $binding['display_host'] ?? null,
+                    'display_port' => (int) $binding['display_port'],
+                    'transport' => strtoupper($binding['transport']),
+                    'enabled' => (bool) ($binding['enabled'] ?? true),
+                    'runtime_meta' => array_merge($existingMeta, $reportedMeta),
+                    'last_synced_at' => $syncedAt,
+                ]);
+
+                $record->save();
             }
         });
 
@@ -204,6 +217,69 @@ class MachineController extends Controller
             'data' => true,
             'synced_at' => $syncedAt,
             'count' => count($params['bindings']),
+        ]);
+    }
+
+    /**
+     * Persist absolute NoBrand Mieru traffic counters for asynchronous,
+     * idempotent accounting.
+     */
+    public function nobrandTraffic(Request $request): JsonResponse
+    {
+        $machine = $this->authenticateMachine($request);
+
+        if (($machine->agent_driver ?: 'xboard-node') !== NoBrandDriver::DRIVER) {
+            abort(409, 'Machine is not configured for NoBrand Hybrid');
+        }
+
+        $params = $request->validate([
+            'node_id' => 'required|integer',
+            'report_id' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9._:-]+$/'],
+            'observed_at' => 'required|integer|min:1',
+            'readings' => 'required|array|max:5000',
+            'readings.*.user_id' => 'required|integer|min:1',
+            'readings.*.instance_id' => ['required', 'string', 'max:64', 'regex:/^u[0-9a-f]{16}$/'],
+            'readings.*.upload_bytes' => 'required|integer|min:0',
+            'readings.*.download_bytes' => 'required|integer|min:0',
+        ]);
+
+        $node = Server::query()
+            ->where('id', (int) $params['node_id'])
+            ->where('machine_id', $machine->id)
+            ->where('runtime_driver', 'nobrand')
+            ->where('type', Server::TYPE_MIERU)
+            ->first();
+
+        if (!$node) {
+            abort(422, 'Traffic report references a node not owned by this NoBrand Hybrid machine');
+        }
+
+        $report = NoBrandTrafficReport::query()->firstOrCreate(
+            ['report_id' => $params['report_id']],
+            [
+                'machine_id' => $machine->id,
+                'server_id' => $node->id,
+                'readings' => array_values($params['readings']),
+                'observed_at' => (int) $params['observed_at'],
+                'status' => 'pending',
+            ]
+        );
+
+        if (
+            (int) $report->machine_id !== (int) $machine->id
+            || (int) $report->server_id !== (int) $node->id
+        ) {
+            abort(409, 'Traffic report ID is already owned by another node');
+        }
+
+        if ($report->status !== 'processed') {
+            ProcessNoBrandTrafficReportJob::dispatch((int) $report->id);
+        }
+
+        return response()->json([
+            'data' => true,
+            'report_id' => $report->report_id,
+            'status' => $report->status,
         ]);
     }
 
