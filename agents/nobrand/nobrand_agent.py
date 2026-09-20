@@ -2,12 +2,14 @@
 """
 Xboard Lite NoBrand companion.
 
-Phase 4 scope:
+Phase 6 scope:
 - Pull declarative NoBrand desired state from Xboard machine API.
 - Reconcile one NoBrand-managed Mieru node per machine.
 - Reconcile multiple Snell v5 logical nodes as isolated per-user instances.
-- Manage only reserved Xboard namespaces (xb<user_id>, xbn<node_id>u<user_id>).
-- Report per-user display endpoints and Mieru traffic back to Xboard.
+- Reconcile one Hysteria2 multi-auth listener per machine.
+- Reconcile multiple NoBrand TUIC v5 named instances with built-in users.
+- Manage only reserved Xboard namespaces and local ownership markers.
+- Report per-user endpoints, generated TUIC credentials, and Mieru traffic back to Xboard.
 
 Security:
 - No shell=True.
