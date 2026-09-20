@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\NoBrandTrafficReport;
 use App\Models\NoBrandUserBinding;
 use App\Models\Server;
+use App\Services\NoBrand\NoBrandTrafficWatermark;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -86,46 +87,20 @@ class ProcessNoBrandTrafficReportJob implements ShouldQueue
                     ? $meta['traffic_watermark']
                     : null;
 
-                $userDeltaU = 0;
-                $userDeltaD = 0;
+                $advanced = NoBrandTrafficWatermark::advance(
+                    $watermark,
+                    $instanceId,
+                    $upload,
+                    $download,
+                    (int) $report->observed_at
+                );
 
-                if (
-                    $watermark
-                    && (string) ($watermark['instance_id'] ?? '') === $instanceId
-                ) {
-                    $previousUpload = max(0, (int) ($watermark['upload_bytes'] ?? 0));
-                    $previousDownload = max(0, (int) ($watermark['download_bytes'] ?? 0));
-
-                    // Counters are cumulative for the lifetime of one isolated
-                    // Mita instance. Never move a same-instance watermark
-                    // backwards: an older out-of-order report must not create
-                    // a false reset or duplicate traffic.
-                    if ($upload >= $previousUpload) {
-                        $userDeltaU = $upload - $previousUpload;
-                        $previousUpload = $upload;
-                    }
-
-                    if ($download >= $previousDownload) {
-                        $userDeltaD = $download - $previousDownload;
-                        $previousDownload = $download;
-                    }
-
-                    $upload = $previousUpload;
-                    $download = $previousDownload;
-                }
-
-                $meta['traffic_watermark'] = [
-                    'instance_id' => $instanceId,
-                    'upload_bytes' => $upload,
-                    'download_bytes' => $download,
-                    'observed_at' => max(
-                        (int) ($watermark['observed_at'] ?? 0),
-                        (int) $report->observed_at
-                    ),
-                ];
-
+                $meta['traffic_watermark'] = $advanced['watermark'];
                 $binding->runtime_meta = $meta;
                 $binding->save();
+
+                $userDeltaU = (int) $advanced['delta_u'];
+                $userDeltaD = (int) $advanced['delta_d'];
 
                 if ($userDeltaU > 0 || $userDeltaD > 0) {
                     $traffic[$userId] = [$userDeltaU, $userDeltaD];
