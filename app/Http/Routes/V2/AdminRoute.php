@@ -69,6 +69,7 @@ class AdminRoute
                 $router->post('/update', [ManageController::class, 'update']);
                 $router->post('/save', [ManageController::class, 'save']);
                 $router->post('/createNoBrandSnell', [ManageController::class, 'createNoBrandSnell']);
+                $router->post('/createNoBrandHy2', [ManageController::class, 'createNoBrandHy2']);
                 $router->post('/drop', [ManageController::class, 'drop']);
                 $router->post('/copy', [ManageController::class, 'copy']);
                 $router->post('/sort', [ManageController::class, 'sort']);
