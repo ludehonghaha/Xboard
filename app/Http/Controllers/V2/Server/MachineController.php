@@ -62,7 +62,7 @@ class MachineController extends Controller
             ->map(function (Server $node) {
                 $desiredUsers = [];
 
-                if (in_array($node->type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)) {
+                if (in_array($node->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)) {
                     $available = ServerService::getAvailableUsers($node);
                     $userIds = $available->pluck('id')->map(fn ($id) => (int) $id)->all();
 
@@ -81,9 +81,11 @@ class MachineController extends Controller
 
                             return [
                                 'user_id' => $userId,
-                                'remote_user' => $node->type === Server::TYPE_SNELL
-                                    ? 'xbn' . (int) $node->id . 'u' . $userId
-                                    : 'xb' . $userId,
+                                'remote_user' => match ($node->type) {
+                                    Server::TYPE_SNELL => 'xbn' . (int) $node->id . 'u' . $userId,
+                                    Server::TYPE_HYSTERIA => 'xbh' . $userId,
+                                    default => 'xb' . $userId,
+                                },
                                 // Mieru password / Snell PSK reuse the existing
                                 // Xboard UUID. Companion must never log it.
                                 'password' => (string) $user->uuid,
@@ -161,7 +163,7 @@ class MachineController extends Controller
             : Server::query()
                 ->where('machine_id', $machine->id)
                 ->where('runtime_driver', 'nobrand')
-                ->whereIn('type', [Server::TYPE_MIERU, Server::TYPE_SNELL])
+                ->whereIn('type', [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA])
                 ->whereIn('id', $nodeIds)
                 ->get()
                 ->keyBy('id');
