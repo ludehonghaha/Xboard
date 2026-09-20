@@ -1,3 +1,12 @@
+> [!IMPORTANT]
+> **Xboard Lite development branch**
+>
+> This branch is being converted from an airport-commerce panel into a lightweight invite-only node/subscription management panel.
+> Storefront, orders, payments, coupons, referral commissions, tickets, notices, email registration/recovery and trial plans are removed.
+> Plans are administrator-assigned service profiles. The user frontend is intentionally kept unchanged for now.
+>
+> Development notes: [docs/XBOARD_LITE_SCOPE.md](docs/XBOARD_LITE_SCOPE.md)
+
 # Xboard
 
 <div align="center">
