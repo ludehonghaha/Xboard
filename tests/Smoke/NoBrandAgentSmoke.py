@@ -369,3 +369,95 @@ else:
     raise SystemExit("[FAIL] HY2 overlay accepted a non-Hysteria inbound")
 
 print("[PASS] HY2 multi-client overlay smoke tests")
+
+
+hy2_node = {
+    "id": 21,
+    "type": "hysteria",
+    "host": "211.136.162.188",
+    "server_port": 23037,
+    "runtime_driver_settings": {
+        "advertise_host": "211.136.162.188",
+        "ingress_profile": "legacy-default-route",
+    },
+    "protocol_settings": {
+        "version": 2,
+        "tls": {
+            "server_name": "www.nvidia.com",
+            "allow_insecure": True,
+        },
+        "obfs": {
+            "open": True,
+            "type": "salamander",
+            "password": None,
+        },
+    },
+    "users": [{
+        "user_id": 7,
+        "remote_user": "xbh7",
+        "password": "550e8400-e29b-41d4-a716-446655440000",
+    }],
+}
+
+hy2_users = agent.desired_users(hy2_node)
+assert_equal(sorted(hy2_users), ["xbh7"], "HY2 reserved client namespace accepted")
+assert_equal(
+    agent.hy2_node_parameters(hy2_node),
+    {
+        "sni": "www.nvidia.com",
+        "port": 23037,
+        "display_host": "211.136.162.188",
+        "ingress_profile": "legacy-default-route",
+    },
+    "HY2 node parameters normalized",
+)
+
+hy2_state = {
+    "protocol": "hysteria2",
+    "enabled": True,
+    "listen_port": 23037,
+    "sni": "www.nvidia.com",
+    "advertise_host": "211.136.162.188",
+    "advertise_port": 23037,
+    "ingress_profile_id": "legacy-default-route",
+}
+assert_equal(
+    agent.hy2_state_matches_node(hy2_node, hy2_state),
+    True,
+    "matching HY2 runtime state is stable",
+)
+assert_equal(
+    agent.hy2_state_matches_node(
+        hy2_node,
+        {**hy2_state, "listen_port": 23038},
+    ),
+    False,
+    "HY2 listener drift requires NoBrand reconfigure",
+)
+assert_equal(
+    agent.hy2_state_matches_node(
+        hy2_node,
+        {**hy2_state, "sni": "www.microsoft.com"},
+    ),
+    False,
+    "HY2 SNI drift requires NoBrand reconfigure",
+)
+assert_equal(
+    agent.hy2_state_matches_node(
+        hy2_node,
+        {**hy2_state, "advertise_host": "203.0.113.7"},
+    ),
+    False,
+    "HY2 display endpoint drift requires NoBrand reconfigure",
+)
+
+bad_hy2_user_node = json.loads(json.dumps(hy2_node))
+bad_hy2_user_node["users"][0]["remote_user"] = "xbh8"
+try:
+    agent.desired_users(bad_hy2_user_node)
+except RuntimeError:
+    pass
+else:
+    raise SystemExit("[FAIL] HY2 client name did not match user_id")
+
+print("[PASS] HY2 desired-state and drift smoke tests")
