@@ -69,7 +69,7 @@ class NoBrandDriverTest extends TestCase
         $this->assertFalse($capabilities['vendored']);
         $this->assertTrue($capabilities['companion_required']);
         $this->assertTrue($capabilities['companion_implemented']);
-        $this->assertSame('0.4.0', $capabilities['companion_version']);
+        $this->assertSame('0.4.1', $capabilities['companion_version']);
         $this->assertSame(4, $capabilities['phase']);
 
         $this->assertContains('snell', $capabilities['upstream_protocols']);
