@@ -579,6 +579,7 @@ def report_status(
         "managed_nodes": int(stats.get("managed_nodes", 0)),
         "managed_users": int(stats.get("managed_users", 0)),
         "bindings": int(stats.get("bindings", 0)),
+        "traffic_readings": int(stats.get("traffic_readings", 0)),
         "reconcile_ms": max(0, int(reconcile_ms)),
     }
     api_post(cfg, "/api/v2/server/machine/nobrand-status", payload)
