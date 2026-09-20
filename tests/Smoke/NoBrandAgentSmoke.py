@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
@@ -13,6 +14,7 @@ if spec is None or spec.loader is None:
     raise SystemExit("[FAIL] unable to load NoBrand agent module")
 
 agent = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = agent
 spec.loader.exec_module(agent)
 
 
