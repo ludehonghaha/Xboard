@@ -133,6 +133,7 @@ class Server extends Model
         'u' => 'integer',
         'd' => 'integer',
         'machine_id' => 'integer',
+        'runtime_driver_settings' => 'array',
     ];
 
     private const MULTIPLEX_CONFIGURATION = [
