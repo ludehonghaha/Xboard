@@ -1858,6 +1858,10 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
         node for node in nodes
         if isinstance(node, dict) and str(node.get("type") or "") == "hysteria"
     ]
+    tuic_nodes = [
+        node for node in nodes
+        if isinstance(node, dict) and str(node.get("type") or "") == "tuic"
+    ]
 
     if len(mieru_nodes) > 1:
         raise RuntimeError(
@@ -1871,11 +1875,13 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
     mieru_bindings: list[dict[str, Any]] = []
     snell_bindings: list[dict[str, Any]] = []
     hy2_bindings: list[dict[str, Any]] = []
+    tuic_bindings: list[dict[str, Any]] = []
 
     if mieru_nodes:
         mieru_bindings.extend(reconcile_mieru(mieru_nodes[0]))
 
     hy2_bindings.extend(reconcile_hy2_node(hy2_nodes[0] if hy2_nodes else None))
+    tuic_bindings.extend(reconcile_tuic_nodes(tuic_nodes))
 
     snell_states = load_snell_states()
     desired_snell_names: set[str] = set()
@@ -1906,11 +1912,11 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
                 **totals,
             }
 
-    bindings = mieru_bindings + snell_bindings + hy2_bindings
+    bindings = mieru_bindings + snell_bindings + hy2_bindings + tuic_bindings
     traffic_readings: list[dict[str, Any]] = []
     managed_node_ids = sorted({
         int(node["id"])
-        for node in (mieru_nodes + snell_nodes + hy2_nodes)
+        for node in (mieru_nodes + snell_nodes + hy2_nodes + tuic_nodes)
     })
 
     if managed_node_ids:
@@ -1929,10 +1935,10 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
                 "readings": traffic_readings,
             })
 
-    managed_nodes = len(mieru_nodes) + len(snell_nodes) + len(hy2_nodes)
+    managed_nodes = len(mieru_nodes) + len(snell_nodes) + len(hy2_nodes) + len(tuic_nodes)
     managed_users = sum(
         len(node.get("users") or [])
-        for node in (mieru_nodes + snell_nodes + hy2_nodes)
+        for node in (mieru_nodes + snell_nodes + hy2_nodes + tuic_nodes)
         if isinstance(node.get("users"), list)
     )
 
@@ -1944,6 +1950,7 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
         "snell_meter_mode": snell_meter_mode,
         "snell_meter_readings": len(snell_meter_totals_map),
         "hy2_clients": len(hy2_bindings),
+        "tuic_users": len(tuic_bindings),
     }
 
 
@@ -1967,6 +1974,7 @@ def report_status(
         "snell_meter_mode": str(stats.get("snell_meter_mode") or cfg.snell_meter),
         "snell_meter_readings": int(stats.get("snell_meter_readings", 0)),
         "hy2_clients": int(stats.get("hy2_clients", 0)),
+        "tuic_users": int(stats.get("tuic_users", 0)),
         "reconcile_ms": max(0, int(reconcile_ms)),
     }
     api_post(cfg, "/api/v2/server/machine/nobrand-status", payload)
