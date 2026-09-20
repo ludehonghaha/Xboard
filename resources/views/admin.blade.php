@@ -388,7 +388,7 @@
           dashboardLoadedAt = Date.now();
 
           const cards = [
-            ['服务器', (data.machines?.online ?? 0) + ' / ' + (data.machines?.total ?? 0), '在线 / 总数'],
+            ['服务器', (data.machines?.online ?? 0) + ' / ' + (data.machines?.total ?? 0), 'Xboard-Node 在线 / 总数 · NoBrand 独立 ' + (data.machines?.nobrand_total ?? 0)],
             ['节点', (data.nodes?.online ?? 0) + ' / ' + (data.nodes?.total ?? 0), '在线 / 总数'],
             ['用户', data.users?.total ?? 0, '活跃 ' + (data.users?.active ?? 0)],
             ['在线用户', data.users?.online ?? 0, '在线设备 ' + (data.users?.online_devices ?? 0)],
@@ -402,9 +402,12 @@
             '<div class="xld-card"><div class="xld-label">' + escapeHtml(String(label)) + '</div><div class="xld-value">' + escapeHtml(String(value)) + '</div><div class="xld-note">' + escapeHtml(String(note)) + '</div></div>'
           ).join('');
 
-          const machineRows = (data.machines?.items || []).map((item) =>
-            '<tr><td>' + escapeHtml(item.name || ('#' + item.id)) + '</td><td class="' + (item.is_online ? 'xld-good' : 'xld-bad') + '">' + (item.is_online ? '在线' : '离线') + '</td><td>' + (item.servers_count ?? 0) + '</td><td class="xld-muted">' + escapeHtml(formatDateTime(item.last_seen_at)) + '</td></tr>'
-          ).join('') || '<tr><td colspan="4" class="xld-muted">暂无服务器</td></tr>';
+          const machineRows = (data.machines?.items || []).map((item) => {
+            const noBrand = item.driver === 'nobrand-oneclick';
+            const stateText = noBrand ? 'NoBrand 独立' : (item.is_online ? '在线' : '离线');
+            const stateClass = noBrand ? 'xld-muted' : (item.is_online ? 'xld-good' : 'xld-bad');
+            return '<tr><td>' + escapeHtml(item.name || ('#' + item.id)) + '</td><td class="' + stateClass + '">' + stateText + '</td><td>' + (noBrand ? '-' : (item.servers_count ?? 0)) + '</td><td class="xld-muted">' + (noBrand ? '由 NoBrand-OneClick 独立管理' : escapeHtml(formatDateTime(item.last_seen_at))) + '</td></tr>';
+          }).join('') || '<tr><td colspan="4" class="xld-muted">暂无服务器</td></tr>';
 
           const serverRows = (data.server_rank || []).map((item, index) =>
             '<tr><td>' + (index + 1) + '</td><td>' + escapeHtml(item.name || '-') + '</td><td>' + escapeHtml(item.type || '-') + '</td><td>' + escapeHtml(formatBytes(item.total)) + '</td></tr>'
@@ -449,6 +452,182 @@
         if (!value) return '-';
         const date = new Date(typeof value === 'number' ? value * 1000 : value);
         return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+      };
+
+      const noBrandMachineApi = async (path, options = {}) => {
+        const auth = findAdminAuth();
+        if (!auth) throw new Error('请先登录后台');
+        const url = '/api/v2/' + encodeURIComponent(window.settings.secure_path) + '/server/machine/' + path;
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            'Authorization': auth,
+            'Accept': 'application/json',
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(options.headers || {})
+          }
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || '请求失败');
+        return payload.data ?? payload;
+      };
+
+      const ensureNoBrandMachineButton = () => {
+        if (!findAdminAuth() || document.getElementById('xboard-lite-nobrand-machine-button')) return;
+
+        if (!document.getElementById('xboard-lite-nobrand-machine-style')) {
+          const style = document.createElement('style');
+          style.id = 'xboard-lite-nobrand-machine-style';
+          style.textContent =
+            '#xboard-lite-nobrand-machine-button{position:fixed;right:22px;bottom:72px;z-index:9997;border:1px solid #374151;border-radius:10px;padding:10px 14px;cursor:pointer;background:#0f172a;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.18)}' +
+            '#xboard-lite-nobrand-machine-overlay{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.62)}' +
+            '#xboard-lite-nobrand-machine-panel{width:min(760px,96vw);max-height:86vh;overflow:auto;border-radius:14px;padding:20px;background:#111827;color:#f9fafb;box-shadow:0 24px 70px rgba(0,0,0,.45)}' +
+            '.xnbm-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.xnbm-input{box-sizing:border-box;width:100%;padding:9px 10px;border-radius:8px;border:1px solid #374151;background:#0b1220;color:#fff}.xnbm-action{padding:8px 11px;border-radius:8px;border:1px solid #374151;background:#1f2937;color:#fff;cursor:pointer}.xnbm-primary{background:#1d4ed8;border-color:#2563eb}.xnbm-muted{color:#9ca3af;font-size:13px}.xnbm-table{width:100%;border-collapse:collapse;margin-top:16px}.xnbm-table th,.xnbm-table td{text-align:left;padding:9px 7px;border-bottom:1px solid #273244}.xnbm-code{width:100%;min-height:110px;margin-top:8px;padding:10px;box-sizing:border-box;border:1px solid #374151;border-radius:8px;background:#020617;color:#e5e7eb;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}';
+          document.head.appendChild(style);
+        }
+
+        const button = document.createElement('button');
+        button.id = 'xboard-lite-nobrand-machine-button';
+        button.type = 'button';
+        button.textContent = 'NoBrand 机器';
+
+        const overlay = document.createElement('div');
+        overlay.id = 'xboard-lite-nobrand-machine-overlay';
+        overlay.innerHTML =
+          '<div id="xboard-lite-nobrand-machine-panel">' +
+            '<div class="xnbm-row" style="justify-content:space-between"><div><h2 style="margin:0">NoBrand-OneClick 机器</h2><div class="xnbm-muted">独立机器类型；只安装 ike 脚本，不安装 Xboard-Node，不同步协议/用户/流量。</div></div><button type="button" class="xnbm-action" id="xnbm-close">关闭</button></div>' +
+            '<div class="xnbm-muted" style="margin-top:10px">固定 ike-sh/NoBrand-OneClick v3.2.2，并校验安装脚本 SHA256。</div>' +
+            '<div style="margin-top:16px"><input id="xnbm-name" class="xnbm-input" placeholder="机器名称，例如 HK-NoBrand-01"></div>' +
+            '<div style="margin-top:10px"><input id="xnbm-notes" class="xnbm-input" placeholder="备注（可选）"></div>' +
+            '<div class="xnbm-row" style="margin-top:12px"><button type="button" class="xnbm-action xnbm-primary" id="xnbm-create">创建并生成一键命令</button><button type="button" class="xnbm-action" id="xnbm-refresh">刷新</button></div>' +
+            '<div id="xnbm-message" class="xnbm-muted" style="min-height:20px;margin-top:10px"></div>' +
+            '<div id="xnbm-command-box" style="display:none;margin-top:12px"><div class="xnbm-muted">复制到目标服务器以安装 NoBrand Manager：</div><textarea id="xnbm-command" class="xnbm-code" readonly></textarea><div class="xnbm-row"><button type="button" class="xnbm-action" id="xnbm-copy">复制命令</button></div></div>' +
+            '<table class="xnbm-table"><thead><tr><th>机器</th><th>备注</th><th>操作</th></tr></thead><tbody id="xnbm-body"></tbody></table>' +
+          '</div>';
+
+        document.body.append(button, overlay);
+
+        const body = overlay.querySelector('#xnbm-body');
+        const message = overlay.querySelector('#xnbm-message');
+        const commandBox = overlay.querySelector('#xnbm-command-box');
+        const commandField = overlay.querySelector('#xnbm-command');
+
+        const setMessage = (value, error = false) => {
+          message.textContent = value || '';
+          message.style.color = error ? '#fca5a5' : '#9ca3af';
+        };
+
+        const showCommand = (command) => {
+          commandField.value = command || '';
+          commandBox.style.display = command ? '' : 'none';
+        };
+
+        const loadMachines = async () => {
+          try {
+            const rows = await noBrandMachineApi('fetch');
+            const machines = (Array.isArray(rows) ? rows : []).filter((item) => item.agent_driver === 'nobrand-oneclick');
+            body.replaceChildren();
+
+            for (const item of machines) {
+              const tr = document.createElement('tr');
+              const name = document.createElement('td');
+              name.textContent = item.name || ('#' + item.id);
+              const notes = document.createElement('td');
+              notes.textContent = item.notes || '-';
+              notes.className = 'xnbm-muted';
+              const actions = document.createElement('td');
+
+              const command = document.createElement('button');
+              command.type = 'button';
+              command.className = 'xnbm-action';
+              command.textContent = '一键命令';
+              command.onclick = async () => {
+                try {
+                  const result = await noBrandMachineApi('installCommand?id=' + encodeURIComponent(item.id));
+                  showCommand(result.command || '');
+                  setMessage('已生成 ' + (item.name || ('#' + item.id)) + ' 的安装命令');
+                } catch (e) { setMessage(e.message, true); }
+              };
+              actions.appendChild(command);
+
+              const del = document.createElement('button');
+              del.type = 'button';
+              del.className = 'xnbm-action';
+              del.style.marginLeft = '6px';
+              del.textContent = '删除';
+              del.onclick = async () => {
+                if (!window.confirm('删除 NoBrand 机器记录 ' + (item.name || item.id) + '？这不会卸载远端 NoBrand。')) return;
+                try {
+                  await noBrandMachineApi('drop', { method: 'POST', body: JSON.stringify({ id: item.id }) });
+                  setMessage('机器记录已删除；远端 NoBrand 未做任何变更');
+                  await loadMachines();
+                } catch (e) { setMessage(e.message, true); }
+              };
+              actions.appendChild(del);
+
+              tr.append(name, notes, actions);
+              body.appendChild(tr);
+            }
+
+            if (!machines.length) {
+              const tr = document.createElement('tr');
+              const td = document.createElement('td');
+              td.colSpan = 3;
+              td.className = 'xnbm-muted';
+              td.textContent = '暂无 NoBrand 独立机器';
+              tr.appendChild(td);
+              body.appendChild(tr);
+            }
+          } catch (e) {
+            setMessage(e.message, true);
+          }
+        };
+
+        overlay.querySelector('#xnbm-create').onclick = async () => {
+          const name = overlay.querySelector('#xnbm-name').value.trim();
+          const notes = overlay.querySelector('#xnbm-notes').value.trim();
+          if (!name) return setMessage('请输入机器名称', true);
+          setMessage('正在创建…');
+          try {
+            const result = await noBrandMachineApi('save', {
+              method: 'POST',
+              body: JSON.stringify({
+                name,
+                notes: notes || null,
+                is_active: true,
+                agent_driver: 'nobrand-oneclick'
+              })
+            });
+            showCommand(result.install_command || '');
+            overlay.querySelector('#xnbm-name').value = '';
+            overlay.querySelector('#xnbm-notes').value = '';
+            setMessage('NoBrand 独立机器已创建。目标机执行下方命令即可。');
+            await loadMachines();
+          } catch (e) {
+            setMessage(e.message, true);
+          }
+        };
+
+        overlay.querySelector('#xnbm-copy').onclick = async () => {
+          if (!commandField.value) return;
+          try {
+            await navigator.clipboard.writeText(commandField.value);
+          } catch (_) {
+            commandField.select();
+            document.execCommand('copy');
+          }
+          setMessage('安装命令已复制');
+        };
+
+        button.onclick = () => {
+          overlay.style.display = 'flex';
+          loadMachines();
+        };
+        overlay.querySelector('#xnbm-close').onclick = () => overlay.style.display = 'none';
+        overlay.querySelector('#xnbm-refresh').onclick = loadMachines;
+        overlay.addEventListener('click', (event) => {
+          if (event.target === overlay) overlay.style.display = 'none';
+        });
       };
 
       const ensureAccessInviteButton = () => {
@@ -657,6 +836,7 @@
           hideRemovedFields();
           hideRemovedColumns();
           ensureAccessInviteButton();
+          ensureNoBrandMachineButton();
           ensureLiteNavigation();
           ensureLiteDashboard();
         });
