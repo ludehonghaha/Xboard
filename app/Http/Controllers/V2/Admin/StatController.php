@@ -36,17 +36,29 @@ class StatController extends Controller
             ->get();
 
         $machineRows = $machines->take(8)->map(function (ServerMachine $machine) use ($onlineCutoff) {
+            $driver = $machine->agent_driver ?: 'xboard-node';
+            $isNoBrand = $driver === 'nobrand-oneclick';
+
             return [
                 'id' => $machine->id,
                 'name' => $machine->name,
+                'driver' => $driver,
                 'is_active' => (bool) $machine->is_active,
-                'is_online' => (bool) $machine->is_active
-                    && (int) $machine->last_seen_at >= $onlineCutoff,
-                'last_seen_at' => $machine->last_seen_at,
+                'is_online' => $isNoBrand
+                    ? null
+                    : ((bool) $machine->is_active && (int) $machine->last_seen_at >= $onlineCutoff),
+                'last_seen_at' => $isNoBrand ? null : $machine->last_seen_at,
                 'servers_count' => $machine->servers_count,
-                'load_status' => $machine->load_status,
+                'load_status' => $isNoBrand ? null : $machine->load_status,
             ];
         })->values();
+
+        $xboardMachines = $machines->filter(
+            fn (ServerMachine $machine) => ($machine->agent_driver ?: 'xboard-node') !== 'nobrand-oneclick'
+        );
+        $noBrandMachines = $machines->filter(
+            fn (ServerMachine $machine) => ($machine->agent_driver ?: 'xboard-node') === 'nobrand-oneclick'
+        );
 
         $nodes = Server::all();
         $onlineNodes = $nodes->filter(fn (Server $server) => (bool) $server->is_online)->count();
@@ -159,11 +171,12 @@ class StatController extends Controller
 
         return $this->success([
             'machines' => [
-                'total' => $machines->count(),
-                'online' => $machines->filter(
+                'total' => $xboardMachines->count(),
+                'online' => $xboardMachines->filter(
                     fn (ServerMachine $machine) => (bool) $machine->is_active
                         && (int) $machine->last_seen_at >= $onlineCutoff
                 )->count(),
+                'nobrand_total' => $noBrandMachines->count(),
                 'items' => $machineRows,
             ],
             'nodes' => [
