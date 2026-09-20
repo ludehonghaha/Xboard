@@ -27,6 +27,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -1498,17 +1499,28 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
         node for node in nodes
         if isinstance(node, dict) and str(node.get("type") or "") == "snell"
     ]
+    hy2_nodes = [
+        node for node in nodes
+        if isinstance(node, dict) and str(node.get("type") or "") == "hysteria"
+    ]
 
     if len(mieru_nodes) > 1:
         raise RuntimeError(
             "only one NoBrand Mieru logical node is supported per machine"
         )
+    if len(hy2_nodes) > 1:
+        raise RuntimeError(
+            "only one NoBrand Hysteria2 logical node is supported per machine"
+        )
 
     mieru_bindings: list[dict[str, Any]] = []
     snell_bindings: list[dict[str, Any]] = []
+    hy2_bindings: list[dict[str, Any]] = []
 
     if mieru_nodes:
         mieru_bindings.extend(reconcile_mieru(mieru_nodes[0]))
+
+    hy2_bindings.extend(reconcile_hy2_node(hy2_nodes[0] if hy2_nodes else None))
 
     snell_states = load_snell_states()
     desired_snell_names: set[str] = set()
@@ -1539,11 +1551,11 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
                 **totals,
             }
 
-    bindings = mieru_bindings + snell_bindings
+    bindings = mieru_bindings + snell_bindings + hy2_bindings
     traffic_readings: list[dict[str, Any]] = []
     managed_node_ids = sorted({
         int(node["id"])
-        for node in (mieru_nodes + snell_nodes)
+        for node in (mieru_nodes + snell_nodes + hy2_nodes)
     })
 
     if managed_node_ids:
@@ -1562,10 +1574,10 @@ def reconcile_once(cfg: Config) -> dict[str, Any]:
                 "readings": traffic_readings,
             })
 
-    managed_nodes = len(mieru_nodes) + len(snell_nodes)
+    managed_nodes = len(mieru_nodes) + len(snell_nodes) + len(hy2_nodes)
     managed_users = sum(
         len(node.get("users") or [])
-        for node in (mieru_nodes + snell_nodes)
+        for node in (mieru_nodes + snell_nodes + hy2_nodes)
         if isinstance(node.get("users"), list)
     )
 
