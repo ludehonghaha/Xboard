@@ -365,6 +365,7 @@ class UserController extends Controller
             ->with('plan:id,name')
             ->orderBy('id', 'asc')
             ->select([
+                'id',
                 'email',
                 'transfer_enable',
                 'u',
