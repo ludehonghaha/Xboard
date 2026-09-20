@@ -208,6 +208,48 @@ class MachineController extends Controller
     }
 
     /**
+     * Report NoBrand companion heartbeat and last reconciliation result.
+     */
+    public function nobrandStatus(Request $request): JsonResponse
+    {
+        $machine = $this->authenticateMachine($request);
+
+        if (($machine->agent_driver ?: 'xboard-node') !== NoBrandDriver::DRIVER) {
+            abort(409, 'Machine is not configured for NoBrand Hybrid');
+        }
+
+        $params = $request->validate([
+            'state' => 'required|string|in:ok,error',
+            'version' => 'required|string|max:32',
+            'message' => 'nullable|string|max:1000',
+            'managed_nodes' => 'nullable|integer|min:0|max:10000',
+            'managed_users' => 'nullable|integer|min:0|max:1000000',
+            'bindings' => 'nullable|integer|min:0|max:1000000',
+            'reconcile_ms' => 'nullable|integer|min:0|max:3600000',
+        ]);
+
+        $now = now()->timestamp;
+        $machine->forceFill([
+            'nobrand_status' => [
+                'state' => $params['state'],
+                'version' => $params['version'],
+                'message' => $params['message'] ?? null,
+                'managed_nodes' => (int) ($params['managed_nodes'] ?? 0),
+                'managed_users' => (int) ($params['managed_users'] ?? 0),
+                'bindings' => (int) ($params['bindings'] ?? 0),
+                'reconcile_ms' => (int) ($params['reconcile_ms'] ?? 0),
+                'updated_at' => $now,
+            ],
+            'nobrand_last_seen_at' => $now,
+        ])->saveQuietly();
+
+        return response()->json([
+            'data' => true,
+            'recorded_at' => $now,
+        ]);
+    }
+
+    /**
      * report machine status
      */
     public function status(Request $request): JsonResponse
