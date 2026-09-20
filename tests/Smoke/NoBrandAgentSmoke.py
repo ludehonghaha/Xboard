@@ -54,3 +54,101 @@ for raw, label in [
         raise SystemExit(f"[FAIL] parser accepted invalid input: {label}")
 
 print("[PASS] NoBrand agent metrics parser smoke tests")
+
+
+snell_node = {
+    "id": 12,
+    "type": "snell",
+    "runtime_driver_settings": {"ingress_profile": "legacy-default-route"},
+    "users": [
+        {
+            "user_id": 7,
+            "remote_user": "xbn12u7",
+            "password": "550e8400-e29b-41d4-a716-446655440000",
+        }
+    ],
+}
+
+snell_users = agent.desired_users(snell_node)
+assert_equal(sorted(snell_users), ["xbn12u7"], "Snell reserved namespace accepted")
+
+bad_snell_node = {
+    **snell_node,
+    "users": [
+        {
+            "user_id": 7,
+            "remote_user": "xbn13u7",
+            "password": "550e8400-e29b-41d4-a716-446655440000",
+        }
+    ],
+}
+try:
+    agent.desired_users(bad_snell_node)
+except RuntimeError:
+    pass
+else:
+    raise SystemExit("[FAIL] Snell instance name from another node namespace was accepted")
+
+base_state = {
+    "protocol": "snell",
+    "instance_id": "s1111111111111111",
+    "name": "xbn12u7",
+    "version": 5,
+    "psk": "550e8400-e29b-41d4-a716-446655440000",
+    "listen_port": 4904,
+    "advertise_mode": "custom",
+    "advertise_host": "entry.example.com",
+    "advertise_port": 4904,
+    "enabled": True,
+    "quic_proxy_enabled": False,
+    "ingress_profile_id": "legacy-default-route",
+}
+wanted = snell_users["xbn12u7"]
+
+assert_equal(
+    agent.snell_state_needs_recreate(snell_node, wanted, base_state),
+    False,
+    "matching Snell state is stable",
+)
+
+assert_equal(
+    agent.snell_state_needs_recreate(
+        snell_node,
+        wanted,
+        {**base_state, "psk": "different-psk"},
+    ),
+    True,
+    "Snell PSK drift requires isolated instance recreation",
+)
+
+assert_equal(
+    agent.snell_state_needs_recreate(
+        snell_node,
+        wanted,
+        {**base_state, "quic_proxy_enabled": True},
+    ),
+    True,
+    "Snell QUIC drift is rejected by Phase 4",
+)
+
+assert_equal(
+    agent.snell_state_needs_recreate(
+        snell_node,
+        wanted,
+        {**base_state, "ingress_profile_id": "other-profile"},
+    ),
+    True,
+    "Snell ingress drift requires isolated instance recreation",
+)
+
+assert_equal(
+    agent.snell_state_needs_recreate(
+        snell_node,
+        wanted,
+        {**base_state, "version": 4},
+    ),
+    True,
+    "Snell v4 is not accepted by Phase 4",
+)
+
+print("[PASS] NoBrand Snell namespace and drift smoke tests")
