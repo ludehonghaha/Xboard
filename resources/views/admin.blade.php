@@ -100,6 +100,7 @@
       ]);
 
       const hiddenColumnLabels = new Set([
+        '余额', 'Balance',
         '佣金', 'Commission',
         '新购', 'New Purchase',
         '续费', 'Renew',
@@ -121,11 +122,17 @@
       ]);
 
       const hiddenFieldLabels = new Set([
+        '余额',
+        '邀请人',
+        '邀请人ID',
         '邀请人邮箱',
         '佣金余额',
         '佣金类型',
         '推荐返利比例',
         '专享折扣比例',
+        '佣金类型',
+        '佣金比例',
+        '推荐返利比例',
         '注册试用',
         '注册试用时长',
         '货币单位',
