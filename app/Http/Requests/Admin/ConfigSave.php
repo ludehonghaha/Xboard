@@ -7,20 +7,6 @@ use Illuminate\Foundation\Http\FormRequest;
 class ConfigSave extends FormRequest
 {
     const RULES = [
-        // invite & commission
-        'invite_force' => '',
-        'invite_commission' => 'integer|nullable',
-        'invite_gen_limit' => 'integer|nullable',
-        'invite_never_expire' => '',
-        'commission_first_time_enable' => '',
-        'commission_auto_check_enable' => '',
-        'commission_withdraw_limit' => 'nullable|numeric',
-        'commission_withdraw_method' => 'nullable|array',
-        'withdraw_close_enable' => '',
-        'commission_distribution_enable' => '',
-        'commission_distribution_l1' => 'nullable|numeric',
-        'commission_distribution_l2' => 'nullable|numeric',
-        'commission_distribution_l3' => 'nullable|numeric',
         // site
         'logo' => 'nullable|url',
         'force_https' => '',
@@ -35,14 +21,9 @@ class ConfigSave extends FormRequest
         'tos_url' => 'nullable|url',
         'currency' => '',
         'currency_symbol' => '',
-        'ticket_must_wait_reply' => '',
         // subscribe
         'plan_change_enable' => '',
         'reset_traffic_method' => 'in:0,1,2,3,4',
-        'surplus_enable' => '',
-        'new_order_event_id' => '',
-        'renew_order_event_id' => '',
-        'change_order_event_id' => '',
         'show_info_to_server_enable' => '',
         'show_protocol_to_server_enable' => '',
         'subscribe_path' => '',
@@ -59,14 +40,6 @@ class ConfigSave extends FormRequest
         'frontend_theme_header' => 'nullable|in:dark,light',
         'frontend_theme_color' => 'nullable|in:default,darkblue,black,green',
         'frontend_background_url' => 'nullable|url',
-        // email
-        'email_host' => '',
-        'email_port' => '',
-        'email_username' => '',
-        'email_password' => '',
-        'email_encryption' => '',
-        'email_from_address' => '',
-        'remind_mail_enable' => '',
         // telegram
         'telegram_bot_enable' => '',
         'telegram_bot_token' => '',
@@ -95,7 +68,6 @@ class ConfigSave extends FormRequest
         'recaptcha_v3_score_threshold' => 'numeric|min:0|max:1',
         'turnstile_secret_key' => '',
         'turnstile_site_key' => '',
-        'email_verify' => 'bool',
         'safe_mode_enable' => 'boolean',
         'register_limit_by_ip_enable' => 'boolean',
         'register_limit_count' => 'integer',
