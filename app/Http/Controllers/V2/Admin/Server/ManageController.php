@@ -129,6 +129,7 @@ class ManageController extends Controller
             'show' => 'nullable|integer',
             'machine_id' => 'nullable|integer',
             'runtime_driver' => 'nullable|string|in:native,nobrand',
+            'runtime_driver_settings' => 'nullable|array',
             'enabled' => 'nullable|boolean',
         ]);
 
@@ -145,6 +146,9 @@ class ManageController extends Controller
         }
         if (array_key_exists('runtime_driver', $params)) {
             $server->runtime_driver = $params['runtime_driver'];
+        }
+        if (array_key_exists('runtime_driver_settings', $params)) {
+            $server->runtime_driver_settings = $params['runtime_driver_settings'];
         }
         if (array_key_exists('enabled', $params)) {
             $server->enabled = (bool) $params['enabled'];
