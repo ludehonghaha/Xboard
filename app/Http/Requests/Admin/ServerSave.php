@@ -121,6 +121,8 @@ class ServerSave extends FormRequest
             'route_ids' => 'nullable|array',
             'parent_id' => 'nullable|integer',
             'machine_id' => 'nullable|integer',
+            'runtime_driver' => 'nullable|string|in:native,nobrand',
+            'runtime_driver_settings' => 'nullable|array',
             'enabled' => 'nullable|boolean',
             'host' => 'required',
             'port' => 'required',
