@@ -102,6 +102,16 @@
         '佣金', 'Commission'
       ]);
 
+      const hiddenPanelLabels = new Set([
+        '今日收入', 'Today Income',
+        '月收入', 'Monthly Income',
+        '总收入', 'Total Income',
+        '总订单', 'Total Orders',
+        '待处理工单', 'Pending Tickets',
+        '待处理佣金', 'Pending Commission',
+        '收入概览', 'Revenue Overview', 'Income Overview'
+      ]);
+
       const hideExactMenuItems = () => {
         document.querySelectorAll('a,button,[role="menuitem"],li').forEach((node) => {
           const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
@@ -112,6 +122,27 @@
             node.closest('a') ||
             node.closest('li') ||
             node;
+
+          target.style.display = 'none';
+          target.setAttribute('data-xboard-lite-hidden', '1');
+        });
+      };
+
+      const hideRemovedPanels = () => {
+        document.querySelectorAll('h1,h2,h3,h4,h5,h6,span,p,div').forEach((node) => {
+          const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!hiddenPanelLabels.has(text)) return;
+
+          let target = node;
+          for (let i = 0; i < 5 && target.parentElement; i++) {
+            const parent = target.parentElement;
+            const cls = String(parent.className || '');
+            if (cls.includes('border') || cls.includes('rounded') || parent.getAttribute('data-slot') === 'card') {
+              target = parent;
+              break;
+            }
+            target = parent;
+          }
 
           target.style.display = 'none';
           target.setAttribute('data-xboard-lite-hidden', '1');
@@ -141,6 +172,7 @@
         requestAnimationFrame(() => {
           scheduled = false;
           hideExactMenuItems();
+          hideRemovedPanels();
           hideRemovedColumns();
         });
       };
