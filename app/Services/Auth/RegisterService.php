@@ -75,27 +75,6 @@ class RegisterService
         return [true, null];
     }
 
-    /**
-     * Consume an access invite. It grants entry only and creates no referral relationship.
-     */
-    private function consumeInviteCode(string $inviteCode): bool
-    {
-        return DB::transaction(function () use ($inviteCode) {
-            $invite = InviteCode::where('code', $inviteCode)
-                ->where('status', InviteCode::STATUS_UNUSED)
-                ->lockForUpdate()
-                ->first();
-
-            if (!$invite) {
-                return false;
-            }
-
-            $invite->status = InviteCode::STATUS_USED;
-            $invite->save();
-            return true;
-        });
-    }
-
     public function register(Request $request): array
     {
         [$valid, $error] = $this->validateRegister($request);
@@ -105,21 +84,45 @@ class RegisterService
 
         HookManager::call('user.register.before', $request);
 
-        if (!$this->consumeInviteCode((string) $request->input('invite_code'))) {
-            return [false, [400, __('Invalid invitation code')]];
-        }
+        try {
+            [$success, $result] = DB::transaction(function () use ($request) {
+                $invite = InviteCode::where('code', (string) $request->input('invite_code'))
+                    ->where('status', InviteCode::STATUS_UNUSED)
+                    ->lockForUpdate()
+                    ->first();
 
-        $userService = app(UserService::class);
-        $user = $userService->createUser([
-            'email' => $request->input('email'),
-            'password' => $request->input('password'),
-            'invite_user_id' => null,
-        ]);
+                if (!$invite) {
+                    return [false, [400, __('Invalid invitation code')]];
+                }
 
-        if (!$user->save()) {
+                $userService = app(UserService::class);
+                $user = $userService->createUser([
+                    'email' => $request->input('email'),
+                    'password' => $request->input('password'),
+                ]);
+
+                if (!$user->save()) {
+                    throw new \RuntimeException('Register failed');
+                }
+
+                $invite->status = InviteCode::STATUS_USED;
+                if (!$invite->save()) {
+                    throw new \RuntimeException('Failed to consume invitation code');
+                }
+
+                return [true, $user];
+            });
+        } catch (\Throwable $e) {
+            report($e);
             return [false, [500, __('Register failed')]];
         }
 
+        if (!$success) {
+            return [false, $result];
+        }
+
+        /** @var User $user */
+        $user = $result;
         HookManager::call('user.register.after', $user);
 
         $user->last_login_at = time();
