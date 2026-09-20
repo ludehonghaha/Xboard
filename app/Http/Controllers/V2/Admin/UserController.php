@@ -23,6 +23,48 @@ class UserController extends Controller
 {
     use QueryOperators;
 
+    private const LITE_FILTER_FIELDS = [
+        'id',
+        'email',
+        'plan_id',
+        'group_id',
+        'transfer_enable',
+        'total_used',
+        'online_count',
+        'expired_at',
+        'uuid',
+        'token',
+        'banned',
+        'remarks',
+        'is_admin',
+        'is_staff',
+    ];
+
+    private const LITE_SORT_FIELDS = [
+        'id',
+        'email',
+        'plan_id',
+        'group_id',
+        'transfer_enable',
+        'u',
+        'd',
+        'total_used',
+        'online_count',
+        'expired_at',
+        'created_at',
+        'updated_at',
+        'banned',
+    ];
+
+    private const HIDDEN_LEGACY_FIELDS = [
+        'balance',
+        'discount',
+        'commission_type',
+        'commission_rate',
+        'commission_balance',
+        'invite_user_id',
+    ];
+
     public function resetSecret(Request $request)
     {
         $user = User::find($request->input('id'));
@@ -59,6 +101,10 @@ class UserController extends Controller
         collect($request->input('filter'))->each(function ($filter) use ($builder) {
             $field = $filter['id'];
             $value = $filter['value'];
+
+            if (!in_array($field, self::LITE_FILTER_FIELDS, true)) {
+                return;
+            }
             $logic = strtolower($filter['logic'] ?? 'and');
 
             if ($logic === 'or') {
@@ -134,7 +180,15 @@ class UserController extends Controller
 
         collect($request->input('sort'))->each(function ($sort) use ($builder) {
             $field = $sort['id'];
+            if (!in_array($field, self::LITE_SORT_FIELDS, true)) {
+                return;
+            }
+
             $direction = $sort['desc'] ? 'DESC' : 'ASC';
+            if ($field === 'total_used') {
+                $builder->orderByRaw('(u + d) ' . $direction);
+                return;
+            }
             $builder->orderBy($field, $direction);
         });
     }
@@ -203,8 +257,17 @@ class UserController extends Controller
     {
         $model = $user;
         $user = $user->toArray();
-        $user['balance'] = $user['balance'] / 100;
+        foreach (self::HIDDEN_LEGACY_FIELDS as $field) {
+            unset($user[$field]);
+        }
+
+        $used = (int) ($user['u'] ?? 0) + (int) ($user['d'] ?? 0);
+        $total = (int) ($user['transfer_enable'] ?? 0);
+        $user['total_used'] = $used;
+        $user['remaining_traffic'] = max(0, $total - $used);
         $user['subscribe_url'] = Helper::getSubscribeUrl($user['token']);
+        $user['is_online'] = (int) ($user['t'] ?? 0) >= time() - 600;
+
         return HookManager::filter('admin.user.transform', $user, $model);
     }
 
@@ -215,9 +278,14 @@ class UserController extends Controller
         ], [
             'id.required' => '用户ID不能为空'
         ]);
-        $user = User::find($request->input('id'));
-        $user = HookManager::filter('admin.user.detail', $user, $request);
-        return $this->success($user);
+        $user = User::with(['plan:id,name', 'group:id,name'])->find($request->input('id'));
+        if (!$user) {
+            return $this->fail([404, '用户不存在']);
+        }
+
+        $data = self::transformUserData($user);
+        $data = HookManager::filter('admin.user.detail', $data, $request);
+        return $this->success($data);
     }
 
     public function update(UserUpdate $request)
@@ -252,10 +320,6 @@ class UserController extends Controller
             $authService = new AuthService($user);
             $authService->removeAllSessions();
         }
-        if (isset($params['balance'])) {
-            $params['balance'] = $params['balance'] * 100;
-        }
-
         $params = HookManager::filter('admin.user.update.params', $params, $request, $user);
 
         HookManager::call('admin.user.update.before', [
@@ -302,7 +366,6 @@ class UserController extends Controller
             ->orderBy('id', 'asc')
             ->select([
                 'email',
-                'balance',
                 'transfer_enable',
                 'u',
                 'd',
@@ -329,7 +392,6 @@ class UserController extends Controller
             // 写入CSV头部
             fputcsv($output, [
                 '邮箱',
-                '余额',
                 '总流量',
                 '剩余流量',
                 '套餐到期时间',
@@ -343,7 +405,6 @@ class UserController extends Controller
                     try {
                         $row = [
                             $user->email,
-                            number_format($user->balance / 100, 2),
                             Helper::trafficConvert($user->transfer_enable),
                             Helper::trafficConvert($user->transfer_enable - ($user->u + $user->d)),
                             $user->expired_at ? date('Y-m-d H:i:s', $user->expired_at) : '长期有效',
