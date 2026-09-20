@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V2\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Server;
+use App\Models\ServerMachine;
 use App\Models\Stat;
 use App\Models\StatServer;
 use App\Models\StatUser;
@@ -18,6 +19,180 @@ class StatController extends Controller
     {
         $this->service = $service;
     }
+    /**
+     * Xboard Lite operational dashboard.
+     * One request returns the server/node/user/traffic overview used by the Lite admin UI.
+     */
+    public function liteDashboard()
+    {
+        $now = time();
+        $onlineCutoff = $now - 300;
+        $todayStart = strtotime('today');
+        $monthStart = strtotime(date('Y-m-1'));
+
+        $machines = ServerMachine::query()
+            ->withCount('servers')
+            ->orderByDesc('last_seen_at')
+            ->get();
+
+        $machineRows = $machines->take(8)->map(function (ServerMachine $machine) use ($onlineCutoff) {
+            return [
+                'id' => $machine->id,
+                'name' => $machine->name,
+                'is_active' => (bool) $machine->is_active,
+                'is_online' => (bool) $machine->is_active
+                    && (int) $machine->last_seen_at >= $onlineCutoff,
+                'last_seen_at' => $machine->last_seen_at,
+                'servers_count' => $machine->servers_count,
+                'load_status' => $machine->load_status,
+            ];
+        })->values();
+
+        $nodes = Server::all();
+        $onlineNodes = $nodes->filter(fn (Server $server) => (bool) $server->is_online)->count();
+
+        $totalUsers = User::count();
+        $onlineUsers = User::where('t', '>=', $now - 600)->count();
+        $onlineDevices = (int) User::where('t', '>=', $now - 600)->sum('online_count');
+        $activeUsers = User::where('banned', 0)
+            ->whereNotNull('plan_id')
+            ->where(function ($query) use ($now) {
+                $query->whereNull('expired_at')
+                    ->orWhere('expired_at', '>', $now);
+            })
+            ->count();
+
+        $trafficSummary = function (int $startAt) use ($now) {
+            $traffic = StatServer::where('record_at', '>=', $startAt)
+                ->where('record_at', '<=', $now)
+                ->selectRaw('COALESCE(SUM(u), 0) as upload, COALESCE(SUM(d), 0) as download, COALESCE(SUM(u + d), 0) as total')
+                ->first();
+
+            return [
+                'upload' => (int) ($traffic->upload ?? 0),
+                'download' => (int) ($traffic->download ?? 0),
+                'total' => (int) ($traffic->total ?? 0),
+            ];
+        };
+
+        $totalTraffic = StatServer::selectRaw(
+            'COALESCE(SUM(u), 0) as upload, COALESCE(SUM(d), 0) as download, COALESCE(SUM(u + d), 0) as total'
+        )->first();
+
+        $serverRank = StatServer::query()
+            ->selectRaw('server_id, server_type, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
+            ->where('record_at', '>=', $todayStart)
+            ->where('record_at', '<=', $now)
+            ->groupBy('server_id', 'server_type')
+            ->orderByDesc('total')
+            ->limit(8)
+            ->get();
+
+        $serverNames = Server::whereIn('id', $serverRank->pluck('server_id')->all())
+            ->get(['id', 'name'])
+            ->keyBy('id');
+
+        $serverRank = $serverRank->map(function ($item) use ($serverNames) {
+            return [
+                'server_id' => (int) $item->server_id,
+                'name' => $serverNames[$item->server_id]->name ?? ('#' . $item->server_id),
+                'type' => $item->server_type,
+                'u' => (int) $item->u,
+                'd' => (int) $item->d,
+                'total' => (int) $item->total,
+            ];
+        })->values();
+
+        $userRank = StatUser::query()
+            ->selectRaw('user_id, SUM(u) as u, SUM(d) as d, SUM(u + d) as total')
+            ->where('record_at', '>=', $todayStart)
+            ->where('record_at', '<=', $now)
+            ->groupBy('user_id')
+            ->orderByDesc('total')
+            ->limit(8)
+            ->get();
+
+        $rankUsers = User::whereIn('id', $userRank->pluck('user_id')->all())
+            ->get(['id', 'email'])
+            ->keyBy('id');
+
+        $userRank = $userRank->map(function ($item) use ($rankUsers) {
+            return [
+                'user_id' => (int) $item->user_id,
+                'email' => $rankUsers[$item->user_id]->email ?? ('#' . $item->user_id),
+                'u' => (int) $item->u,
+                'd' => (int) $item->d,
+                'total' => (int) $item->total,
+            ];
+        })->values();
+
+        $recentUsers = User::query()
+            ->with('plan:id,name')
+            ->orderByDesc('created_at')
+            ->limit(8)
+            ->get(['id', 'email', 'plan_id', 'expired_at', 'created_at'])
+            ->map(function (User $user) {
+                return [
+                    'id' => $user->id,
+                    'email' => $user->email,
+                    'plan' => $user->plan?->name,
+                    'expired_at' => $user->expired_at,
+                    'created_at' => $user->created_at,
+                ];
+            });
+
+        $expiringUsers = User::query()
+            ->with('plan:id,name')
+            ->whereNotNull('expired_at')
+            ->whereBetween('expired_at', [$now, $now + 7 * 86400])
+            ->orderBy('expired_at')
+            ->limit(8)
+            ->get(['id', 'email', 'plan_id', 'expired_at'])
+            ->map(function (User $user) {
+                return [
+                    'id' => $user->id,
+                    'email' => $user->email,
+                    'plan' => $user->plan?->name,
+                    'expired_at' => $user->expired_at,
+                ];
+            });
+
+        return $this->success([
+            'machines' => [
+                'total' => $machines->count(),
+                'online' => $machines->filter(
+                    fn (ServerMachine $machine) => (bool) $machine->is_active
+                        && (int) $machine->last_seen_at >= $onlineCutoff
+                )->count(),
+                'items' => $machineRows,
+            ],
+            'nodes' => [
+                'total' => $nodes->count(),
+                'online' => $onlineNodes,
+            ],
+            'users' => [
+                'total' => $totalUsers,
+                'active' => $activeUsers,
+                'online' => $onlineUsers,
+                'online_devices' => $onlineDevices,
+            ],
+            'traffic' => [
+                'today' => $trafficSummary($todayStart),
+                'month' => $trafficSummary($monthStart),
+                'total' => [
+                    'upload' => (int) ($totalTraffic->upload ?? 0),
+                    'download' => (int) ($totalTraffic->download ?? 0),
+                    'total' => (int) ($totalTraffic->total ?? 0),
+                ],
+            ],
+            'server_rank' => $serverRank,
+            'user_rank' => $userRank,
+            'recent_users' => $recentUsers,
+            'expiring_users' => $expiringUsers,
+            'generated_at' => $now,
+        ]);
+    }
+
     public function getOverride(Request $request)
     {
         // 获取在线节点数
