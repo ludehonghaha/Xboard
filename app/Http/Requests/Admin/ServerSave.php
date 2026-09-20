@@ -102,10 +102,6 @@ class ServerSave extends FormRequest
             'transport' => 'required|string|in:TCP,UDP',
             'traffic_pattern' => 'string',
         ],
-        'snell' => [
-            'version' => 'required|integer|in:5',
-            'quic' => 'nullable|boolean',
-        ],
         'anytls' => [
             'tls' => 'nullable|array',
             'alpn' => 'nullable|string',
@@ -125,8 +121,6 @@ class ServerSave extends FormRequest
             'route_ids' => 'nullable|array',
             'parent_id' => 'nullable|integer',
             'machine_id' => 'nullable|integer',
-            'runtime_driver' => 'nullable|string|in:native,nobrand',
-            'runtime_driver_settings' => 'nullable|array',
             'enabled' => 'nullable|boolean',
             'host' => 'required',
             'port' => 'required',
