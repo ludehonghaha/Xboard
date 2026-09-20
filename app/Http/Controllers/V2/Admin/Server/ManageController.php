@@ -313,6 +313,8 @@ class ManageController extends Controller
                 }
             });
             return $this->success(true);
+        } catch (\InvalidArgumentException $e) {
+            return $this->fail([422, $e->getMessage()]);
         } catch (\Exception $e) {
             Log::error($e);
             return $this->fail([500, '批量更新失败']);
