@@ -256,19 +256,25 @@ class UserController extends Controller
     public static function transformUserData(User $user): array
     {
         $model = $user;
-        $user = $user->toArray();
-        foreach (self::HIDDEN_LEGACY_FIELDS as $field) {
-            unset($user[$field]);
+        $data = $user->toArray();
+
+        $used = (int) ($data['u'] ?? 0) + (int) ($data['d'] ?? 0);
+        $total = (int) ($data['transfer_enable'] ?? 0);
+        $data['total_used'] = $used;
+        $data['remaining_traffic'] = max(0, $total - $used);
+        $data['subscribe_url'] = Helper::getSubscribeUrl($data['token']);
+        $data['is_online'] = (int) ($data['t'] ?? 0) >= time() - 600;
+
+        $data = HookManager::filter('admin.user.transform', $data, $model);
+        if (!is_array($data)) {
+            $data = (array) $data;
         }
 
-        $used = (int) ($user['u'] ?? 0) + (int) ($user['d'] ?? 0);
-        $total = (int) ($user['transfer_enable'] ?? 0);
-        $user['total_used'] = $used;
-        $user['remaining_traffic'] = max(0, $total - $used);
-        $user['subscribe_url'] = Helper::getSubscribeUrl($user['token']);
-        $user['is_online'] = (int) ($user['t'] ?? 0) >= time() - 600;
+        foreach (self::HIDDEN_LEGACY_FIELDS as $field) {
+            unset($data[$field]);
+        }
 
-        return HookManager::filter('admin.user.transform', $user, $model);
+        return $data;
     }
 
     public function getUserInfoById(Request $request)
@@ -283,8 +289,15 @@ class UserController extends Controller
             return $this->fail([404, '用户不存在']);
         }
 
-        $data = self::transformUserData($user);
-        $data = HookManager::filter('admin.user.detail', $data, $request);
+        $user = HookManager::filter('admin.user.detail', $user, $request);
+        if ($user instanceof User) {
+            return $this->success(self::transformUserData($user));
+        }
+
+        $data = is_array($user) ? $user : (array) $user;
+        foreach (self::HIDDEN_LEGACY_FIELDS as $field) {
+            unset($data[$field]);
+        }
         return $this->success($data);
     }
 
