@@ -29,6 +29,8 @@ class MachineController extends Controller
                     'is_active' => $machine->is_active,
                     'agent_driver' => $machine->agent_driver ?: 'xboard-node',
                     'agent_settings' => $machine->agent_settings,
+                    'nobrand_status' => $machine->nobrand_status,
+                    'nobrand_last_seen_at' => $machine->nobrand_last_seen_at,
                     'last_seen_at' => $machine->last_seen_at,
                     'load_status' => $machine->load_status,
                     'servers_count' => $machine->servers_count,
