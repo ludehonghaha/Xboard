@@ -184,6 +184,90 @@ class ManageController extends Controller
         }
     }
 
+    public function createNoBrandSnell(Request $request)
+    {
+        $params = $request->validate([
+            'name' => 'required|string|max:64',
+            'host' => 'required|string|max:255',
+            'machine_id' => 'required|integer',
+            'group_ids' => 'required|array|min:1',
+            'group_ids.*' => 'integer',
+            'ingress_profile' => 'nullable|string|max:128',
+            'advertise_host' => 'nullable|string|max:255',
+            'rate' => 'nullable|numeric|min:0',
+        ]);
+
+        $groupIds = collect($params['group_ids'])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if (
+            $groupIds->isEmpty()
+            || ServerGroup::query()->whereIn('id', $groupIds)->count() !== $groupIds->count()
+        ) {
+            return $this->fail([422, '权限组无效']);
+        }
+
+        $runtimeSettings = array_filter([
+            'advertise_host' => trim((string) ($params['advertise_host'] ?? '')),
+            'ingress_profile' => trim((string) ($params['ingress_profile'] ?? '')),
+        ], fn ($value) => $value !== '');
+
+        $candidate = [
+            'type' => Server::TYPE_SNELL,
+            'machine_id' => (int) $params['machine_id'],
+            'runtime_driver' => 'nobrand',
+            'runtime_driver_settings' => $runtimeSettings,
+            'protocol_settings' => [
+                'version' => 5,
+                'quic' => false,
+            ],
+        ];
+
+        if ($error = $this->validateRuntimeDriverBinding($candidate)) {
+            return $this->fail($error);
+        }
+
+        try {
+            $server = Server::create([
+                'type' => Server::TYPE_SNELL,
+                'name' => trim($params['name']),
+                'host' => trim($params['host']),
+                // Snell NoBrand nodes are logical subscription/permission
+                // objects. Real per-user ports live in NoBrandUserBinding.
+                'port' => 1,
+                'server_port' => 1,
+                'group_ids' => $groupIds->map(fn ($id) => (string) $id)->all(),
+                'route_ids' => [],
+                'tags' => ['nobrand', 'snell-v5'],
+                'show' => true,
+                'enabled' => true,
+                'rate' => (float) ($params['rate'] ?? 1),
+                'sort' => ((int) Server::max('sort')) + 1,
+                'protocol_settings' => [
+                    'version' => 5,
+                    'quic' => false,
+                ],
+                'machine_id' => (int) $params['machine_id'],
+                'runtime_driver' => 'nobrand',
+                'runtime_driver_settings' => $runtimeSettings,
+                'transfer_enable' => 0,
+                'u' => 0,
+                'd' => 0,
+            ]);
+
+            return $this->success([
+                'id' => $server->id,
+                'name' => $server->name,
+                'type' => $server->type,
+            ]);
+        } catch (\Exception $e) {
+            Log::error($e);
+            return $this->fail([500, '创建 NoBrand Snell 节点失败']);
+        }
+    }
+
     public function update(Request $request)
     {
         $params = $request->validate([
