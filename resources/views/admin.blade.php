@@ -262,6 +262,182 @@
         return payload;
       };
 
+      const formatBytes = (value) => {
+        const bytes = Number(value || 0);
+        if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+        const amount = bytes / Math.pow(1024, index);
+        return amount.toFixed(amount >= 100 || index === 0 ? 0 : amount >= 10 ? 1 : 2) + ' ' + units[index];
+      };
+
+      const formatDateTime = (value) => {
+        if (!value) return '-';
+        const normalized = typeof value === 'number' ? value * 1000 : value;
+        const date = new Date(normalized);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+      };
+
+      const dashboardApi = async () => {
+        const auth = findAdminAuth();
+        if (!auth) throw new Error('请先登录后台');
+        const url = '/api/v2/' + encodeURIComponent(window.settings.secure_path) + '/stat/liteDashboard';
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': auth,
+            'Accept': 'application/json'
+          }
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || '仪表盘加载失败');
+        return payload.data ?? payload;
+      };
+
+      const isDashboardPage = () => {
+        const hash = (window.location.hash || '').replace(/^#\/?/, '').split('?')[0].replace(/\/$/, '');
+        if (!hash || hash === 'dashboard') return true;
+
+        const main = document.querySelector('main,[role="main"]');
+        if (!main) return false;
+        const heading = main.querySelector('h1,h2');
+        const title = (heading?.textContent || '').trim();
+        return title === '仪表盘' || title === 'Dashboard' || title === 'Панель управления';
+      };
+
+      const restoreUpstreamDashboard = () => {
+        document.querySelectorAll('[data-xboard-lite-dashboard-hidden="1"]').forEach((node) => {
+          node.style.display = node.getAttribute('data-xboard-lite-prev-display') || '';
+          node.removeAttribute('data-xboard-lite-dashboard-hidden');
+          node.removeAttribute('data-xboard-lite-prev-display');
+        });
+        document.getElementById('xboard-lite-dashboard')?.remove();
+      };
+
+      const ensureLiteDashboard = () => {
+        if (!isDashboardPage() || !findAdminAuth()) {
+          restoreUpstreamDashboard();
+          return;
+        }
+
+        const main = document.querySelector('main,[role="main"]');
+        if (!main) return;
+
+        let panel = document.getElementById('xboard-lite-dashboard');
+        if (!panel) {
+          Array.from(main.children).forEach((child) => {
+            if (child.id === 'xboard-lite-dashboard') return;
+            child.setAttribute('data-xboard-lite-prev-display', child.style.display || '');
+            child.setAttribute('data-xboard-lite-dashboard-hidden', '1');
+            child.style.display = 'none';
+          });
+
+          if (!document.getElementById('xboard-lite-dashboard-style')) {
+            const style = document.createElement('style');
+            style.id = 'xboard-lite-dashboard-style';
+            style.textContent =
+              '#xboard-lite-dashboard{width:100%;padding:24px;box-sizing:border-box}' +
+              '.xld-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:20px}' +
+              '.xld-title{margin:0;font-size:26px;font-weight:700}.xld-subtitle{margin-top:4px;color:#6b7280;font-size:13px}' +
+              '.xld-refresh{border:1px solid #d1d5db;background:transparent;border-radius:8px;padding:8px 12px;cursor:pointer}' +
+              '.xld-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}' +
+              '.xld-card{border:1px solid rgba(127,127,127,.22);border-radius:12px;padding:15px;min-width:0}' +
+              '.xld-label{font-size:12px;color:#6b7280;margin-bottom:7px}.xld-value{font-size:25px;font-weight:700;line-height:1.15}' +
+              '.xld-note{font-size:12px;color:#6b7280;margin-top:5px}' +
+              '.xld-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}' +
+              '.xld-section{border:1px solid rgba(127,127,127,.22);border-radius:12px;padding:15px;min-width:0;overflow:hidden}' +
+              '.xld-section h3{margin:0 0 12px;font-size:15px}.xld-table{width:100%;border-collapse:collapse;font-size:13px}' +
+              '.xld-table th,.xld-table td{text-align:left;padding:8px 6px;border-bottom:1px solid rgba(127,127,127,.16);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}' +
+              '.xld-table th{font-size:11px;color:#6b7280;font-weight:600}.xld-good{color:#16a34a}.xld-bad{color:#dc2626}.xld-muted{color:#6b7280}' +
+              '.xld-error{padding:18px;border:1px solid rgba(220,38,38,.3);border-radius:10px;color:#dc2626}' +
+              '@media(max-width:1100px){.xld-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.xld-sections{grid-template-columns:1fr}}' +
+              '@media(max-width:640px){#xboard-lite-dashboard{padding:14px}.xld-grid{grid-template-columns:1fr 1fr}.xld-head{flex-direction:column}}';
+            document.head.appendChild(style);
+          }
+
+          panel = document.createElement('section');
+          panel.id = 'xboard-lite-dashboard';
+          panel.innerHTML =
+            '<div class="xld-head"><div><h1 class="xld-title">Xboard Lite</h1><div class="xld-subtitle">服务器 · 节点 · 用户 · 流量运行概览</div></div><button class="xld-refresh" type="button">刷新</button></div>' +
+            '<div id="xld-content"><div class="xld-muted">正在加载运行数据…</div></div>';
+          main.appendChild(panel);
+          panel.querySelector('.xld-refresh').onclick = () => loadLiteDashboard(true);
+        }
+
+        loadLiteDashboard(false);
+      };
+
+      let dashboardLoading = false;
+      let dashboardLoadedAt = 0;
+
+      const loadLiteDashboard = async (force = false) => {
+        const panel = document.getElementById('xboard-lite-dashboard');
+        if (!panel || dashboardLoading) return;
+        if (!force && Date.now() - dashboardLoadedAt < 30000) return;
+
+        const content = panel.querySelector('#xld-content');
+        dashboardLoading = true;
+        try {
+          const data = await dashboardApi();
+          dashboardLoadedAt = Date.now();
+
+          const cards = [
+            ['服务器', (data.machines?.online ?? 0) + ' / ' + (data.machines?.total ?? 0), '在线 / 总数'],
+            ['节点', (data.nodes?.online ?? 0) + ' / ' + (data.nodes?.total ?? 0), '在线 / 总数'],
+            ['用户', data.users?.total ?? 0, '活跃 ' + (data.users?.active ?? 0)],
+            ['在线用户', data.users?.online ?? 0, '在线设备 ' + (data.users?.online_devices ?? 0)],
+            ['今日流量', formatBytes(data.traffic?.today?.total), '↑ ' + formatBytes(data.traffic?.today?.upload) + '  ↓ ' + formatBytes(data.traffic?.today?.download)],
+            ['本月流量', formatBytes(data.traffic?.month?.total), '↑ ' + formatBytes(data.traffic?.month?.upload) + '  ↓ ' + formatBytes(data.traffic?.month?.download)],
+            ['累计流量', formatBytes(data.traffic?.total?.total), '历史节点流量'],
+            ['更新时间', formatDateTime(data.generated_at), '30 秒内使用缓存']
+          ];
+
+          const cardHtml = cards.map(([label, value, note]) =>
+            '<div class="xld-card"><div class="xld-label">' + escapeHtml(String(label)) + '</div><div class="xld-value">' + escapeHtml(String(value)) + '</div><div class="xld-note">' + escapeHtml(String(note)) + '</div></div>'
+          ).join('');
+
+          const machineRows = (data.machines?.items || []).map((item) =>
+            '<tr><td>' + escapeHtml(item.name || ('#' + item.id)) + '</td><td class="' + (item.is_online ? 'xld-good' : 'xld-bad') + '">' + (item.is_online ? '在线' : '离线') + '</td><td>' + (item.servers_count ?? 0) + '</td><td class="xld-muted">' + escapeHtml(formatDateTime(item.last_seen_at)) + '</td></tr>'
+          ).join('') || '<tr><td colspan="4" class="xld-muted">暂无服务器</td></tr>';
+
+          const serverRows = (data.server_rank || []).map((item, index) =>
+            '<tr><td>' + (index + 1) + '</td><td>' + escapeHtml(item.name || '-') + '</td><td>' + escapeHtml(item.type || '-') + '</td><td>' + escapeHtml(formatBytes(item.total)) + '</td></tr>'
+          ).join('') || '<tr><td colspan="4" class="xld-muted">今日暂无流量</td></tr>';
+
+          const userRows = (data.user_rank || []).map((item, index) =>
+            '<tr><td>' + (index + 1) + '</td><td>' + escapeHtml(item.email || '-') + '</td><td>' + escapeHtml(formatBytes(item.total)) + '</td></tr>'
+          ).join('') || '<tr><td colspan="3" class="xld-muted">今日暂无流量</td></tr>';
+
+          const recentRows = (data.recent_users || []).map((item) =>
+            '<tr><td>' + escapeHtml(item.email || '-') + '</td><td>' + escapeHtml(item.plan || '未分配') + '</td><td class="xld-muted">' + escapeHtml(formatDateTime(item.created_at)) + '</td></tr>'
+          ).join('') || '<tr><td colspan="3" class="xld-muted">暂无用户</td></tr>';
+
+          const expiringRows = (data.expiring_users || []).map((item) =>
+            '<tr><td>' + escapeHtml(item.email || '-') + '</td><td>' + escapeHtml(item.plan || '未分配') + '</td><td>' + escapeHtml(formatDateTime(item.expired_at)) + '</td></tr>'
+          ).join('') || '<tr><td colspan="3" class="xld-muted">未来 7 天无人到期</td></tr>';
+
+          content.innerHTML =
+            '<div class="xld-grid">' + cardHtml + '</div>' +
+            '<div class="xld-sections">' +
+              '<section class="xld-section"><h3>服务器状态</h3><table class="xld-table"><thead><tr><th>服务器</th><th>状态</th><th>节点</th><th>最后心跳</th></tr></thead><tbody>' + machineRows + '</tbody></table></section>' +
+              '<section class="xld-section"><h3>今日节点流量排行</h3><table class="xld-table"><thead><tr><th>#</th><th>节点</th><th>协议</th><th>流量</th></tr></thead><tbody>' + serverRows + '</tbody></table></section>' +
+              '<section class="xld-section"><h3>今日用户流量排行</h3><table class="xld-table"><thead><tr><th>#</th><th>用户</th><th>流量</th></tr></thead><tbody>' + userRows + '</tbody></table></section>' +
+              '<section class="xld-section"><h3>最近注册用户</h3><table class="xld-table"><thead><tr><th>用户</th><th>套餐</th><th>注册时间</th></tr></thead><tbody>' + recentRows + '</tbody></table></section>' +
+              '<section class="xld-section"><h3>7 天内到期</h3><table class="xld-table"><thead><tr><th>用户</th><th>套餐</th><th>到期时间</th></tr></thead><tbody>' + expiringRows + '</tbody></table></section>' +
+            '</div>';
+        } catch (error) {
+          if (content) content.innerHTML = '<div class="xld-error">' + escapeHtml(error?.message || '仪表盘加载失败') + '</div>';
+        } finally {
+          dashboardLoading = false;
+        }
+      };
+
+      const escapeHtml = (value) => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
       const inviteDate = (value) => {
         if (!value) return '-';
         const date = new Date(typeof value === 'number' ? value * 1000 : value);
@@ -421,6 +597,7 @@
           hideRemovedFields();
           hideRemovedColumns();
           ensureAccessInviteButton();
+          ensureLiteDashboard();
         });
       };
 
@@ -428,6 +605,8 @@
       window.addEventListener('DOMContentLoaded', () => {
         clean();
         observer.observe(document.body, { childList: true, subtree: true });
+        window.addEventListener('hashchange', clean);
+        window.addEventListener('popstate', clean);
       });
     })();
   </script>
