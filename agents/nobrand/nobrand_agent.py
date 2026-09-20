@@ -781,9 +781,14 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
 
     bindings = mieru_bindings + snell_bindings
     traffic_readings: list[dict[str, Any]] = []
+    managed_node_ids = sorted({
+        int(node["id"])
+        for node in (mieru_nodes + snell_nodes)
+    })
 
-    if bindings:
+    if managed_node_ids:
         api_post(cfg, "/api/v2/server/machine/nobrand-bindings", {
+            "node_ids": managed_node_ids,
             "bindings": bindings,
         })
 
