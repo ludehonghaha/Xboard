@@ -130,7 +130,7 @@ Xboard Lite has a Phase 4 external runtime integration for `ike-sh/NoBrand-OneCl
 - Nodes distinguish `native` from `nobrand` runtime ownership.
 - Native machine discovery excludes NoBrand-owned nodes to avoid double ownership.
 - The Xboard-owned companion is stored under `agents/nobrand/` and invokes only structured local `nobrand` actions without `shell=True`.
-- Companion version `0.4.0` currently manages Mieru and Snell v5.
+- Companion version `0.4.1` currently manages Mieru and Snell v5.
 - Mieru uses per-user isolated Mita instances and real per-user endpoint bindings.
 - Mieru absolute Mita byte counters are converted to idempotent deltas and fed into the normal Xboard user/server traffic pipeline.
 - Snell v5 uses one isolated NoBrand instance per Xboard user/node pair, with the Xboard UUID reused as the PSK.
