@@ -301,6 +301,7 @@ class MachineController extends Controller
             'managed_nodes' => 'nullable|integer|min:0|max:10000',
             'managed_users' => 'nullable|integer|min:0|max:1000000',
             'bindings' => 'nullable|integer|min:0|max:1000000',
+            'traffic_readings' => 'nullable|integer|min:0|max:1000000',
             'reconcile_ms' => 'nullable|integer|min:0|max:3600000',
         ]);
 
@@ -313,6 +314,7 @@ class MachineController extends Controller
                 'managed_nodes' => (int) ($params['managed_nodes'] ?? 0),
                 'managed_users' => (int) ($params['managed_users'] ?? 0),
                 'bindings' => (int) ($params['bindings'] ?? 0),
+                'traffic_readings' => (int) ($params['traffic_readings'] ?? 0),
                 'reconcile_ms' => (int) ($params['reconcile_ms'] ?? 0),
                 'updated_at' => $now,
             ],
