@@ -50,6 +50,8 @@ SNELL_STATE_DIR = "/var/lib/nobrand-oneclick/snell/instances"
 SNELL_METER_STATE_FILE = "/var/lib/xboard-nobrand-agent/snell-meter.json"
 SNELL_METER_TABLE = "xboard_nobrand_meter"
 SNELL_METER_OWNER = "xboard_owner_v1"
+NOBRAND_HY2_CONFIG_FILE = "/etc/nobrand-oneclick/hysteria2/config.json"
+NOBRAND_HY2_STATE_FILE = "/var/lib/nobrand-oneclick/hysteria2/state.json"
 
 STOP = False
 
@@ -256,6 +258,87 @@ def collect_traffic_readings(bindings: list[dict[str, Any]]) -> list[dict[str, A
         })
 
     return readings
+
+
+def hy2_reserved_email(user_id: int) -> str:
+    if user_id <= 0:
+        raise RuntimeError("invalid HY2 user id")
+    return f"xbh{user_id}@xboard.invalid"
+
+
+def build_hy2_multiclient_config(
+    base_config: dict[str, Any],
+    users: list[dict[str, Any]],
+) -> dict[str, Any]:
+    # Deep-copy through JSON so the caller's authoritative base object is
+    # never mutated in place.
+    try:
+        config = json.loads(json.dumps(base_config))
+    except Exception as exc:
+        raise RuntimeError("HY2 base config is not JSON-serializable") from exc
+
+    inbounds = config.get("inbounds")
+    if not isinstance(inbounds, list) or len(inbounds) != 1:
+        raise RuntimeError("HY2 overlay requires exactly one NoBrand inbound")
+
+    inbound = inbounds[0]
+    if not isinstance(inbound, dict) or inbound.get("protocol") != "hysteria":
+        raise RuntimeError("HY2 overlay refused a non-Hysteria inbound")
+
+    settings = inbound.get("settings")
+    if not isinstance(settings, dict) or int(settings.get("version") or 0) != 2:
+        raise RuntimeError("HY2 overlay requires Hysteria version 2 settings")
+
+    stream = inbound.get("streamSettings")
+    if not isinstance(stream, dict):
+        raise RuntimeError("HY2 overlay requires streamSettings")
+    if stream.get("network") != "hysteria" or stream.get("security") != "tls":
+        raise RuntimeError("HY2 overlay refused unexpected transport/security")
+
+    seen_auth: set[str] = set()
+    clients: list[dict[str, str]] = []
+
+    for item in users:
+        if not isinstance(item, dict):
+            continue
+        user_id = int(item.get("user_id") or 0)
+        auth = str(item.get("password") or "")
+        if user_id <= 0 or not auth or len(auth) > 256:
+            raise RuntimeError("HY2 desired user is invalid")
+        if auth in seen_auth:
+            raise RuntimeError("HY2 desired users contain duplicate auth")
+        seen_auth.add(auth)
+        clients.append({
+            "auth": auth,
+            "email": hy2_reserved_email(user_id),
+        })
+
+    settings["clients"] = clients
+    inbound["settings"] = settings
+    inbounds[0] = inbound
+    config["inbounds"] = inbounds
+    return config
+
+
+def assert_hy2_overlay_preserves_runtime(
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> None:
+    # The only permitted structural change is settings.clients.
+    left = json.loads(json.dumps(before))
+    right = json.loads(json.dumps(after))
+
+    try:
+        left_clients = left["inbounds"][0]["settings"].pop("clients", None)
+        right_clients = right["inbounds"][0]["settings"].pop("clients", None)
+    except Exception as exc:
+        raise RuntimeError("HY2 overlay structure is invalid") from exc
+
+    if left != right:
+        raise RuntimeError("HY2 overlay changed fields outside settings.clients")
+    if right_clients is None or not isinstance(right_clients, list):
+        raise RuntimeError("HY2 overlay did not produce a clients list")
+    # left_clients may be any upstream single-client bootstrap value.
 
 
 def runtime_settings(node: dict[str, Any]) -> dict[str, Any]:
