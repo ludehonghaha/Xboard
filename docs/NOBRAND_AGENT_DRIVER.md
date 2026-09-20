@@ -79,7 +79,10 @@ Implemented:
 - Mieru per-instance bandwidth reconciliation
 - Mieru Display Endpoint host reconciliation
 - NoBrand `user-export` JSON parsing and per-user endpoint reporting
-- CI syntax checks for PHP, Python and Bash
+- Companion heartbeat / reconciliation status reporting
+- Admin NoBrand manager overlay for machine driver and Mieru runtime settings
+- Admin health display: Companion online/offline, OK/Error, managed users, bindings and reconcile latency
+- CI syntax checks for PHP, Python, Bash and the Lite Admin runtime JavaScript
 
 ## Phase 2 runtime boundary
 
@@ -206,8 +209,7 @@ agents/nobrand/install.sh
 
 The next useful work is:
 
-1. Admin UI for choosing `NoBrand Hybrid` and Mieru runtime settings.
-2. Runtime status/error reporting in the machine page.
-3. NoBrand traffic/accounting ingestion.
-4. Snell as the next dedicated NoBrand protocol model.
-5. Release-tag/checksum pinning for the Xboard-owned companion itself.
+1. NoBrand traffic/accounting ingestion.
+2. Snell as the next dedicated NoBrand protocol model.
+3. Release-tag/checksum pinning for the Xboard-owned companion itself.
+4. Replace the compatibility overlay with native Admin source once a source-built Lite frontend is introduced.
