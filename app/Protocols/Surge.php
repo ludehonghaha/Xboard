@@ -21,6 +21,7 @@ class Surge extends AbstractProtocol
         Server::TYPE_ANYTLS,
         Server::TYPE_SOCKS,
         Server::TYPE_HTTP,
+        Server::TYPE_SNELL,
     ];
     protected $protocolRequirements = [
         'surge.hysteria.protocol_settings.version' => [2 => '2398'],
@@ -73,6 +74,10 @@ class Surge extends AbstractProtocol
             }
             if ($item['type'] === Server::TYPE_HTTP) {
                 $proxies .= self::buildHttp($item['password'], $item);
+                $proxyGroup .= $item['name'] . ', ';
+            }
+            if ($item['type'] === Server::TYPE_SNELL) {
+                $proxies .= self::buildSnell($item['password'], $item);
                 $proxyGroup .= $item['name'] . ', ';
             }
         }
@@ -206,6 +211,17 @@ class Surge extends AbstractProtocol
         $uri = implode(',', $config);
         $uri .= "\r\n";
         return $uri;
+    }
+
+    public static function buildSnell($password, $server)
+    {
+        $name = $server['name'];
+        $host = $server['host'];
+        $port = (int) $server['port'];
+        $psk = data_get($server, 'password', $password);
+        $version = (int) data_get($server, 'protocol_settings.version', 5);
+
+        return "{$name} = snell, {$host}, {$port}, psk = {$psk}, version = {$version}\r\n";
     }
 
     //参考文档: https://manual.nssurge.com/policy/proxy.html
