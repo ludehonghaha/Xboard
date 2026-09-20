@@ -66,3 +66,21 @@ The upstream admin frontend is distributed as the compiled `xboard-admin-dist` s
 - adds a Lite invitation-code manager in the admin shell.
 
 A future standalone Lite admin frontend can replace this compatibility layer without changing the backend model.
+
+
+## Lite admin dashboard
+
+The upstream commerce-oriented dashboard is visually replaced on the admin home page by an operational dashboard.
+
+It shows:
+
+- Server machines: online / total and recent heartbeat
+- Protocol nodes: online / total
+- Users: total / active / online and online device count
+- Traffic: today / current month / cumulative
+- Today's node traffic ranking
+- Today's user traffic ranking
+- Recently registered users
+- Users expiring within 7 days
+
+The upstream compiled admin application remains mounted for compatibility. Legacy zero-value commerce statistic endpoints are temporarily retained so the compiled bundle does not fail while its dashboard is hidden. They can be removed after the admin frontend is fully replaced.
