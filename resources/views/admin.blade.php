@@ -852,6 +852,7 @@
               ' · Mieru Traffic ' + Number(nbStatus.traffic_readings || 0) +
               ' · Snell Meter ' + escapeHtml(nbStatus.snell_meter_mode || 'off') +
               '/' + Number(nbStatus.snell_meter_readings || 0) +
+              ' · HY2 Clients ' + Number(nbStatus.hy2_clients || 0) +
               ' · ' + Number(nbStatus.reconcile_ms || 0) + ' ms</span></div>';
 
             if (nbState === 'error' && nbStatus.message) {
