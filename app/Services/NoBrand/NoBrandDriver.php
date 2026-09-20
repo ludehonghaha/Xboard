@@ -46,7 +46,7 @@ final class NoBrandDriver
         'snell',
     ];
 
-    public const COMPANION_VERSION = '0.4.0';
+    public const COMPANION_VERSION = '0.4.1';
     public const COMPANION_INSTALLER_URL = 'https://raw.githubusercontent.com/ludehonghaha/Xboard/xboard-lite-v1/agents/nobrand/install.sh';
 
     /**
