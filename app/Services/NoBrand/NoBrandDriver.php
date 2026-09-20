@@ -9,7 +9,7 @@ use InvalidArgumentException;
  *
  * No upstream GPL source is vendored here. This class only defines the
  * pinned external artifact, integrity check and the structured actions
- * that a future Xboard-Node companion driver may execute locally.
+ * executed by the Xboard-owned local companion.
  */
 final class NoBrandDriver
 {
@@ -38,14 +38,14 @@ final class NoBrandDriver
     ];
 
     /**
-     * Existing Xboard node types that Phase 1 may mark for NoBrand runtime.
+     * Xboard node types currently implemented by the NoBrand companion.
      * Snell / Sudoku / SSH / Forward need dedicated panel modelling later.
      */
     public const PANEL_RUNTIME_TYPES = [
         'mieru',
     ];
 
-    public const COMPANION_VERSION = '0.2.0';
+    public const COMPANION_VERSION = '0.3.0';
     public const COMPANION_INSTALLER_URL = 'https://raw.githubusercontent.com/ludehonghaha/Xboard/xboard-lite-v1/agents/nobrand/install.sh';
 
     /**
@@ -116,7 +116,7 @@ final class NoBrandDriver
             'companion_implemented' => true,
             'companion_version' => self::COMPANION_VERSION,
             'implemented_runtime_protocols' => self::PANEL_RUNTIME_TYPES,
-            'phase' => 2,
+            'phase' => 3,
         ];
     }
 
