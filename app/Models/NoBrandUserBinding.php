@@ -11,6 +11,8 @@ class NoBrandUserBinding extends Model
 
     protected $guarded = ['id'];
 
+    protected $hidden = ['credential_payload'];
+
     protected $casts = [
         'display_port' => 'integer',
         'enabled' => 'boolean',
