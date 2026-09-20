@@ -10,12 +10,12 @@ Architecture:
 Xboard Lite
   └─ ServerMachine
       ├─ Xboard-Node machine runtime      -> runtime_driver=native
-      └─ NoBrand companion (future)       -> runtime_driver=nobrand
+      └─ Xboard NoBrand Companion         -> runtime_driver=nobrand
              └─ local nobrand CLI
                   └─ ike-sh/NoBrand-OneClick runtime/state
 ```
 
-This keeps Xboard's native runtime available and lets an administrator opt into NoBrand only where its deployment model is useful.
+The companion is stored in this Xboard fork under `agents/nobrand/`. The upstream NoBrand source is not copied into this repository.
 
 ## Source and license boundary
 
@@ -23,89 +23,143 @@ Upstream:
 
 - Repository: `ike-sh/NoBrand-OneClick`
 - License: GPL-3.0
-- Pinned release for Phase 1: `v3.2.2`
+- Pinned release: `v3.2.2`
 - Installer SHA-256: `37ba6fb4f35c7e032d05021782a090040af09337c5e95a42cbc0f8f0cf7d66c0`
 
 Xboard Lite does **not** copy `install-nobrand.sh` or the upstream `src/` tree into this repository.
 
-The machine bootstrap downloads the exact upstream release asset and verifies its SHA-256 before running manager-only installation. This repository stores only the adapter contract, release identity, checksum, declarative state and Xboard-specific integration code.
+Hybrid bootstrap:
 
-Do not change the pinned version without reviewing the new upstream CLI contract and updating tests.
+1. Installs Xboard-Node machine mode.
+2. Downloads the exact NoBrand v3.2.2 release installer.
+3. Verifies the pinned SHA-256.
+4. Runs NoBrand manager-only installation.
+5. Installs the Xboard-owned NoBrand Companion systemd service.
+
+Do not change the pinned NoBrand version without reviewing the upstream CLI contract and updating tests.
 
 ## Why Hybrid instead of replacing Xboard-Node
 
-Current Xboard-Node already handles several protocols natively, including Mieru, Hysteria2, TUIC and VLESS/REALITY through its supported kernels.
+Current Xboard-Node already handles several protocols natively. NoBrand is only selected where its management model is useful.
 
-NoBrand remains useful for behavior that is specific to the NoBrand management model, such as:
-
-- NoBrand Mieru multi-user / dedicated-instance management
-- Mieru quota, expiration and per-instance rate controls
-- Multi-Ingress / Display Endpoint policy
-- Snell
-- VLESS FinalMask/Sudoku deployment
-- SSH Tunnel
-- Port Forward
-- NoBrand-specific lifecycle / backup / Doctor behavior
-
-A machine can therefore be:
+A machine can be:
 
 - `xboard-node`: native Xboard-Node only
-- `nobrand-hybrid`: Xboard-Node plus NoBrand manager / companion
+- `nobrand-hybrid`: Xboard-Node plus NoBrand manager and companion
 
 A node can be:
 
 - `runtime_driver=native`: owned by Xboard-Node
-- `runtime_driver=nobrand`: reserved for the NoBrand companion
+- `runtime_driver=nobrand`: owned by the NoBrand Companion
 
-Native machine discovery intentionally excludes NoBrand nodes so both runtimes cannot own the same listener.
+Native machine discovery intentionally excludes NoBrand-owned nodes so both runtimes cannot bind the same listener.
 
-## Phase 1 status
+## Phase 2 status
 
-Implemented in the panel:
+Implemented:
 
 - Machine `agent_driver`: `xboard-node | nobrand-hybrid`
 - Machine `agent_settings`
 - Node `runtime_driver`: `native | nobrand`
 - Node `runtime_driver_settings`
-- Validation requiring NoBrand nodes to bind to a NoBrand Hybrid machine
-- Exact v3.2.2 manager bootstrap with checksum verification
-- Driver capability endpoint for Admin
-- Separate machine-auth desired-state endpoint:
+- Exact NoBrand v3.2.2 manager bootstrap with checksum verification
+- Standalone Xboard NoBrand Companion `0.2.0`
+- Companion systemd installer
+- Machine-auth desired-state endpoint:
   - native: `POST /api/v2/server/machine/nodes`
   - NoBrand: `POST /api/v2/server/machine/nobrand-nodes`
-- Native Xboard-Node discovery excludes `runtime_driver=nobrand`
+- Machine-auth binding report endpoint:
+  - `POST /api/v2/server/machine/nobrand-bindings`
+- Per-user NoBrand endpoint binding table
+- Subscription endpoint resolution for NoBrand Mieru dedicated users
+- Clash/Mihomo Mieru rendering with distinct username/password
+- General `mierus://` rendering
+- Mieru user add/delete reconciliation
+- Mieru expiry reconciliation
+- Mieru per-instance bandwidth reconciliation
+- Mieru Display Endpoint host reconciliation
+- NoBrand `user-export` JSON parsing and per-user endpoint reporting
+- CI syntax checks for PHP, Python and Bash
 
-Not implemented yet:
+## Phase 2 runtime boundary
 
-- The Xboard-Node NoBrand companion process that reconciles desired state into local `nobrand` CLI actions
-- NoBrand runtime status / result reporting back to the panel
-- NoBrand user reconciliation
-- Dedicated Xboard node models/renderers for Snell and other upstream-only products
-- Admin UI for selecting/configuring the driver beyond the backend contract
+The pinned upstream NoBrand release supports more products, but the live companion currently reconciles only:
 
-Until the companion exists, a NoBrand node is declarative state only and must not be represented as automatically deployed.
+- `mieru`
+
+Therefore the panel rejects `runtime_driver=nobrand` for other Xboard node types in Phase 2.
+
+Also, one machine may currently own only one NoBrand Mieru node. This matches NoBrand's current machine-level Mieru state model and avoids two Xboard logical nodes competing for the same authoritative NoBrand Mieru state.
+
+Future phases can add dedicated models/drivers for:
+
+- Snell v4/v5
+- Hysteria2
+- TUIC v5
+- VLESS FinalMask/Sudoku
+- VLESS REALITY
+- SSH Tunnel
+- Port Forward
+
+Do not infer "supported by upstream NoBrand" as "implemented by the Xboard companion."
+
+## Mieru user model
+
+NoBrand Mieru uses isolated per-user instances with independent ports, while native Xboard nodes normally expose one node port to all users.
+
+Phase 2 therefore stores a per-user binding:
+
+```text
+Xboard user
+  -> remote_user = xb<user_id>
+  -> password = existing Xboard UUID
+  -> NoBrand isolated instance
+  -> actual/display port reported by companion
+  -> v2_nobrand_user_binding
+  -> subscription renderer
+```
+
+The binding table stores endpoint/runtime metadata only. It does not duplicate the password or a full share URI.
+
+If a NoBrand Mieru binding has not been reported yet, that node is omitted from the user's subscription instead of falling back to an incorrect generic node port.
+
+## Reconciliation ownership
+
+The companion owns only users in the reserved namespace:
+
+```text
+xb<positive integer>
+```
+
+Examples:
+
+```text
+xb18
+xb1024
+```
+
+Manual NoBrand users outside that namespace are not deleted or modified.
+
+Desired user state currently synchronizes:
+
+- Xboard user ID
+- reserved NoBrand username
+- Xboard UUID as the NoBrand password
+- expiry date
+- speed limit as NoBrand per-instance bandwidth
+- display host
+
+Traffic quota is **not** automatically mirrored into NoBrand in Phase 2. Xboard traffic is global/account-level while NoBrand quota is per local Mieru instance; blindly copying the same total quota to several nodes would multiply the user's usable traffic.
+
+NoBrand traffic reporting back into Xboard is a later phase.
 
 ## Security model
 
-The companion must **not** expose arbitrary remote shell execution.
+The companion does not provide remote shell execution.
 
-Panel-to-agent control must be structured and allow-listed. Examples:
+It pulls structured desired state and builds local subprocess argument arrays. Python `subprocess.run(...)` is used without `shell=True`.
 
-```text
-manager.install
-manager.status
-manager.doctor
-mieru.install
-mieru.user-add
-mieru.user-set-quota
-snell.install
-hy2.install
-...
-```
-
-The companion maps an allowed action and validated parameters to a fixed local `nobrand` CLI invocation.
-
-The panel must never send strings such as:
+The panel never sends commands such as:
 
 ```text
 shell.exec
@@ -113,34 +167,47 @@ bash -c ...
 arbitrary_command
 ```
 
-Secrets returned by explicit `show` / `export` operations must not be written to normal application logs.
+The machine token is stored root-only in:
 
-## Protocol boundary
+```text
+/etc/xboard-nobrand-agent.json
+```
 
-The pinned NoBrand release exposes a broader upstream scope than Xboard currently models.
+The systemd service runs as root because NoBrand lifecycle actions require root privileges.
 
-Phase 1 Xboard node types that can be marked for the NoBrand runtime:
+Routine logs do not print passwords, UUIDs, exported share links or full NoBrand command arguments.
 
-- `mieru`
-- `hysteria` (Hysteria2 in current Xboard model)
-- `tuic`
-- `vless`
+## Local files
 
-Upstream NoBrand capabilities not yet modeled as dedicated Xboard node types include Snell, SSH Tunnel and Forward. VLESS Sudoku also needs a clear panel model before it is exposed as a normal node.
+```text
+/usr/local/bin/xboard-nobrand-agent
+/etc/xboard-nobrand-agent.json
+/etc/systemd/system/xboard-nobrand-agent.service
+```
 
-Do not infer "present upstream" as "implemented in the panel."
+Repository source:
 
-## Next companion contract
+```text
+agents/nobrand/nobrand_agent.py
+agents/nobrand/install.sh
+```
 
-The future Xboard-Node fork should add a NoBrand companion that:
+## Current limitations
 
-1. Runs only when the machine is configured as `nobrand-hybrid`.
-2. Authenticates with the existing machine ID/token.
-3. Polls or subscribes to NoBrand desired state.
-4. Compares desired state with local NoBrand state.
-5. Executes only allow-listed local actions.
-6. Reports sanitized status and reconciliation results.
-7. Never sends credentials/private keys in routine heartbeat logs.
-8. Leaves `runtime_driver=native` nodes entirely to the existing Xboard-Node machine orchestrator.
+- systemd target hosts only for the companion installer
+- one NoBrand Mieru logical node per machine
+- TCP or UDP Mieru in the current Xboard node model; BOTH is not exposed yet
+- no automatic global Mieru protocol reconfigure after deployment; protocol drift fails closed
+- no NoBrand traffic accounting pushed into Xboard yet
+- no dedicated Admin UI for advanced NoBrand runtime settings yet
+- companion installer currently follows the `xboard-lite-v1` branch and should be release-pinned before production rollout
 
-The companion code belongs in the user's Xboard-Node fork. The ike upstream script still does not need to be copied into that fork.
+## Next phase
+
+The next useful work is:
+
+1. Admin UI for choosing `NoBrand Hybrid` and Mieru runtime settings.
+2. Runtime status/error reporting in the machine page.
+3. NoBrand traffic/accounting ingestion.
+4. Snell as the next dedicated NoBrand protocol model.
+5. Release-tag/checksum pinning for the Xboard-owned companion itself.
