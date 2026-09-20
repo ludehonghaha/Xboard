@@ -122,16 +122,31 @@ User filtering and sorting use a Lite allow-list so removed financial/referral f
 
 ## NoBrand Hybrid Agent
 
-Xboard Lite has a Phase 2 external runtime integration for `ike-sh/NoBrand-OneClick`.
+Xboard Lite has a Phase 4 external runtime integration for `ike-sh/NoBrand-OneClick`.
 
 - Upstream GPL source is not vendored into Xboard Lite.
 - The panel pins NoBrand v3.2.2 and verifies the release installer SHA-256.
 - Machines distinguish `xboard-node` from `nobrand-hybrid`.
 - Nodes distinguish `native` from `nobrand` runtime ownership.
 - Native machine discovery excludes NoBrand-owned nodes to avoid double ownership.
-- The Xboard-owned companion is stored under `agents/nobrand/` and invokes only structured local `nobrand` actions.
-- Phase 2 implements NoBrand Mieru dedicated-user reconciliation and per-user endpoint bindings.
-- A NoBrand Mieru endpoint is hidden from subscription output until the companion has reported that user's real isolated-instance port.
-- NoBrand traffic-quota mirroring is intentionally deferred until traffic accounting can be reconciled safely.
+- The Xboard-owned companion is stored under `agents/nobrand/` and invokes only structured local `nobrand` actions without `shell=True`.
+- Companion version `0.4.0` currently manages Mieru and Snell v5.
+- Mieru uses per-user isolated Mita instances and real per-user endpoint bindings.
+- Mieru absolute Mita byte counters are converted to idempotent deltas and fed into the normal Xboard user/server traffic pipeline.
+- Snell v5 uses one isolated NoBrand instance per Xboard user/node pair, with the Xboard UUID reused as the PSK.
+- Snell v5 QUIC Proxy is intentionally disabled in Phase 4.
+- Snell nodes render to verified Mihomo, Surge and sing-box formats; no unverified generic Snell URI is invented.
+- Snell traffic accounting and per-user speed-limit enforcement are not implemented yet.
+- A dedicated NoBrand Admin overlay manages Hybrid machines, Mieru Runtime settings, Snell logical nodes and Companion health.
+
+Reserved Xboard-owned NoBrand names are:
+
+```text
+Mieru: xb<user_id>
+Snell: xbn<node_id>u<user_id>
+```
+
+Manual NoBrand resources outside these namespaces are not removed by the companion.
 
 See [NOBRAND_AGENT_DRIVER.md](NOBRAND_AGENT_DRIVER.md).
+
