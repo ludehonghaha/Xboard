@@ -1080,8 +1080,15 @@ def reconcile_snell_node(
     return bindings
 
 
-def reconcile_once(cfg: Config) -> dict[str, int]:
+def reconcile_once(cfg: Config) -> dict[str, Any]:
     desired = api_post(cfg, "/api/v2/server/machine/nobrand-nodes")
+    agent_settings = desired.get("agent_settings")
+    if not isinstance(agent_settings, dict):
+        agent_settings = {}
+    snell_meter_mode = str(agent_settings.get("snell_meter") or cfg.snell_meter).lower()
+    if snell_meter_mode not in {"off", "nft"}:
+        raise RuntimeError("panel returned invalid snell_meter mode")
+
     nodes = desired.get("nodes")
     if not isinstance(nodes, list):
         raise RuntimeError("panel desired state has no nodes array")
@@ -1121,7 +1128,7 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
             delete_snell_instance(name)
 
     latest_snell_states = load_snell_states()
-    snell_meter_totals_map = sync_snell_nft_meter(cfg.snell_meter, latest_snell_states)
+    snell_meter_totals_map = sync_snell_nft_meter(snell_meter_mode, latest_snell_states)
 
     for binding in snell_bindings:
         instance_id = str(binding.get("instance_id") or "")
@@ -1170,6 +1177,7 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
         "managed_users": managed_users,
         "bindings": len(bindings),
         "traffic_readings": len(traffic_readings),
+        "snell_meter_mode": snell_meter_mode,
         "snell_meter_readings": len(snell_meter_totals_map),
     }
 
@@ -1179,7 +1187,7 @@ def report_status(
     state: str,
     *,
     message: str | None = None,
-    stats: dict[str, int] | None = None,
+    stats: dict[str, Any] | None = None,
     reconcile_ms: int = 0,
 ) -> None:
     stats = stats or {}
@@ -1191,7 +1199,7 @@ def report_status(
         "managed_users": int(stats.get("managed_users", 0)),
         "bindings": int(stats.get("bindings", 0)),
         "traffic_readings": int(stats.get("traffic_readings", 0)),
-        "snell_meter_mode": cfg.snell_meter,
+        "snell_meter_mode": str(stats.get("snell_meter_mode") or cfg.snell_meter),
         "snell_meter_readings": int(stats.get("snell_meter_readings", 0)),
         "reconcile_ms": max(0, int(reconcile_ms)),
     }
