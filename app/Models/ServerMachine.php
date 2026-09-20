@@ -14,6 +14,8 @@ use Illuminate\Support\Str;
  * @property string $token 认证 Token
  * @property string|null $notes 备注
  * @property bool $is_active 是否启用
+ * @property string $agent_driver Agent 驱动
+ * @property array|null $agent_settings Agent 驱动设置
  * @property int|null $last_seen_at 最后心跳时间
  * @property array|null $load_status 负载状态
  * @property \Illuminate\Support\Carbon $created_at
@@ -29,6 +31,7 @@ class ServerMachine extends Model
 
     protected $casts = [
         'is_active' => 'boolean',
+        'agent_settings' => 'array',
         'last_seen_at' => 'integer',
         'load_status' => 'array',
         'created_at' => 'timestamp',
