@@ -26,6 +26,11 @@ class ManageController extends Controller
             return null;
         }
 
+        $type = $params['type'] ?? $existing?->type;
+        if ($type !== Server::TYPE_MIERU) {
+            return [422, 'NoBrand Agent Phase 2 当前仅开放 Mieru Runtime'];
+        }
+
         if (!$machineId) {
             return [422, 'NoBrand Runtime 节点必须绑定 NoBrand Hybrid 机器'];
         }
@@ -33,6 +38,17 @@ class ManageController extends Controller
         $machine = ServerMachine::find($machineId);
         if (!$machine || $machine->agent_driver !== 'nobrand-hybrid') {
             return [422, '所选机器未启用 NoBrand Hybrid Agent'];
+        }
+
+        $duplicate = Server::query()
+            ->where('machine_id', $machineId)
+            ->where('runtime_driver', 'nobrand')
+            ->where('type', Server::TYPE_MIERU)
+            ->when($existing, fn ($query) => $query->where('id', '!=', $existing->id))
+            ->exists();
+
+        if ($duplicate) {
+            return [422, 'Phase 2 每台机器仅允许一个 NoBrand Mieru 节点'];
         }
 
         return null;
