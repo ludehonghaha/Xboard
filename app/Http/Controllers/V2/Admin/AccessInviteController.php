@@ -59,6 +59,10 @@ class AccessInviteController extends Controller
             return $this->fail([404, '邀请码不存在']);
         }
 
+        if ($invite->status !== InviteCode::STATUS_UNUSED) {
+            return $this->fail([409, '已使用的邀请码不能删除']);
+        }
+
         return $this->success((bool) $invite->delete());
     }
 }
