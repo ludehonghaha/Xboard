@@ -10,11 +10,12 @@ PANEL=""
 MACHINE_ID=""
 TOKEN=""
 POLL_INTERVAL="30"
+SNELL_METER="off"
 
 usage() {
   cat <<'EOF'
 Usage:
-  sudo bash install.sh --panel https://panel.example.com --machine-id 1 --token TOKEN [--poll-interval 30]
+  sudo bash install.sh --panel https://panel.example.com --machine-id 1 --token TOKEN [--poll-interval 30] [--snell-meter off|nft]
 EOF
 }
 
@@ -24,6 +25,7 @@ while [ "$#" -gt 0 ]; do
     --machine-id) MACHINE_ID="${2:-}"; shift 2 ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
     --poll-interval) POLL_INTERVAL="${2:-}"; shift 2 ;;
+    --snell-meter) SNELL_METER="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -43,6 +45,10 @@ command -v nobrand >/dev/null 2>&1 || { echo "nobrand manager must be installed 
   echo "--poll-interval must be 10-3600" >&2
   exit 2
 }
+case "$SNELL_METER" in
+  off|nft) ;;
+  *) echo "--snell-meter must be off or nft" >&2; exit 2 ;;
+esac
 
 tmp="$(mktemp /tmp/xboard-nobrand-agent.XXXXXX)"
 trap 'rm -f "$tmp"' EXIT
@@ -50,15 +56,16 @@ curl -fsSL "$AGENT_URL" -o "$tmp"
 python3 -m py_compile "$tmp"
 install -o root -g root -m 0755 "$tmp" "$AGENT_BIN"
 
-python3 - "$CONFIG_FILE" "$PANEL" "$MACHINE_ID" "$TOKEN" "$POLL_INTERVAL" <<'PY'
+python3 - "$CONFIG_FILE" "$PANEL" "$MACHINE_ID" "$TOKEN" "$POLL_INTERVAL" "$SNELL_METER" <<'PY'
 import json, os, sys, tempfile
-path, panel, machine_id, token, poll = sys.argv[1:]
+path, panel, machine_id, token, poll, snell_meter = sys.argv[1:]
 payload = {
     "panel_url": panel.rstrip("/"),
     "machine_id": int(machine_id),
     "token": token,
     "poll_interval": int(poll),
     "timeout": 20,
+    "snell_meter": snell_meter,
 }
 directory = os.path.dirname(path)
 os.makedirs(directory, exist_ok=True)
