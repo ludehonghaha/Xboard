@@ -26,7 +26,6 @@ class UserUpdate extends FormRequest
             'is_staff' => 'boolean',
             'u' => 'integer',
             'd' => 'integer',
-            'balance' => 'numeric',
             'remarks' => 'nullable',
             'speed_limit' => 'nullable|integer',
             'device_limit' => 'nullable|integer'
@@ -50,7 +49,6 @@ class UserUpdate extends FormRequest
             'plan_id.integer' => '订阅计划格式不正确',
             'u.integer' => '上行流量格式不正确',
             'd.integer' => '下行流量格式不正确',
-            'balance.integer' => '余额格式不正确',
             'password.min' => '密码长度最小8位',
             'speed_limit.integer' => '限速格式不正确',
             'device_limit.integer' => '设备数量格式不正确'
