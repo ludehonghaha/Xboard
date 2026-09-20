@@ -8,7 +8,6 @@ use App\Models\Server;
 use App\Models\ServerMachine;
 use App\Models\ServerMachineLoadHistory;
 use App\Services\NodeSyncService;
-use App\Services\NoBrand\NoBrandDriver;
 use Illuminate\Http\Request;
 
 class MachineController extends Controller
@@ -27,10 +26,6 @@ class MachineController extends Controller
                     'name' => $machine->name,
                     'notes' => $machine->notes,
                     'is_active' => $machine->is_active,
-                    'agent_driver' => $machine->agent_driver ?: 'xboard-node',
-                    'agent_settings' => $machine->agent_settings,
-                    'nobrand_status' => $machine->nobrand_status,
-                    'nobrand_last_seen_at' => $machine->nobrand_last_seen_at,
                     'last_seen_at' => $machine->last_seen_at,
                     'load_status' => $machine->load_status,
                     'servers_count' => $machine->servers_count,
@@ -52,9 +47,6 @@ class MachineController extends Controller
             'name' => 'required|string|max:255',
             'notes' => 'nullable|string',
             'is_active' => 'nullable|boolean',
-            'agent_driver' => 'nullable|string|in:xboard-node,nobrand-hybrid',
-            'agent_settings' => 'nullable|array',
-            'agent_settings.snell_meter' => 'nullable|string|in:off,nft',
         ]);
 
         if (!empty($params['id'])) {
@@ -66,18 +58,6 @@ class MachineController extends Controller
             if (array_key_exists('is_active', $params)) {
                 $update['is_active'] = $params['is_active'];
             }
-            if (array_key_exists('agent_driver', $params)) {
-                $update['agent_driver'] = $params['agent_driver'];
-            }
-            if (array_key_exists('agent_settings', $params)) {
-                $update['agent_settings'] = $params['agent_settings'];
-            }
-
-            if (($update['agent_driver'] ?? $machine->agent_driver) !== 'nobrand-hybrid'
-                && $machine->servers()->where('runtime_driver', 'nobrand')->exists()) {
-                return $this->fail([422, '该机器仍绑定 NoBrand Runtime 节点，不能切回普通 Agent']);
-            }
-
             $machine->update($update);
             return $this->success(true);
         }
@@ -86,8 +66,6 @@ class MachineController extends Controller
             'name' => $params['name'],
             'notes' => $params['notes'] ?? null,
             'is_active' => $params['is_active'] ?? true,
-            'agent_driver' => $params['agent_driver'] ?? 'xboard-node',
-            'agent_settings' => $params['agent_settings'] ?? null,
             'token' => ServerMachine::generateToken(),
         ]);
 
@@ -166,11 +144,6 @@ class MachineController extends Controller
         return $this->success(true);
     }
 
-    public function nobrandCapabilities()
-    {
-        return $this->success(NoBrandDriver::capabilities());
-    }
-
     /**
      * 获取机器下的节点列表
      */
@@ -231,24 +204,12 @@ class MachineController extends Controller
         $panelUrl = rtrim((string) (admin_setting('app_url') ?: $request->getSchemeAndHttpHost()), '/');
         $installerUrl = 'https://raw.githubusercontent.com/cedar2025/xboard-node/dev/install.sh';
 
-        $xboardCommand = sprintf(
+        return sprintf(
             'curl -fsSL %s | sudo bash -s -- --mode machine --panel %s --token %s --machine-id %d',
             $installerUrl,
             escapeshellarg($panelUrl),
             escapeshellarg($machine->token),
             $machine->id
         );
-
-        if (($machine->agent_driver ?: 'xboard-node') !== NoBrandDriver::DRIVER) {
-            return $xboardCommand;
-        }
-
-        return $xboardCommand
-            . ' && ' . NoBrandDriver::managerBootstrapCommand()
-            . ' && ' . NoBrandDriver::companionBootstrapCommand(
-                $panelUrl,
-                (int) $machine->id,
-                (string) $machine->token
-            );
     }
 }
