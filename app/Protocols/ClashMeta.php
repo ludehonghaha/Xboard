@@ -25,7 +25,6 @@ class ClashMeta extends AbstractProtocol
         Server::TYPE_SOCKS,
         Server::TYPE_HTTP,
         Server::TYPE_MIERU,
-        Server::TYPE_SNELL,
     ];
 
     protected $protocolRequirements = [
@@ -193,10 +192,6 @@ class ClashMeta extends AbstractProtocol
             }
             if ($item['type'] === Server::TYPE_MIERU) {
                 array_push($proxy, self::buildMieru($item['password'], $item));
-                array_push($proxies, $item['name']);
-            }
-            if ($item['type'] === Server::TYPE_SNELL) {
-                array_push($proxy, self::buildSnell($item['password'], $item));
                 array_push($proxies, $item['name']);
             }
         }
@@ -647,8 +642,8 @@ class ClashMeta extends AbstractProtocol
         if (data_get($protocol_settings, 'version') === 4) {
             $array['token'] = $password;
         } else {
-            $array['uuid'] = data_get($server, 'runtime_binding.uuid', $password);
-            $array['password'] = data_get($server, 'runtime_binding.password', data_get($server, 'password', $password));
+            $array['uuid'] = $password;
+            $array['password'] = $password;
         }
 
         $array['skip-cert-verify'] = (bool) data_get($protocol_settings, 'tls.allow_insecure', false);
@@ -690,21 +685,6 @@ class ClashMeta extends AbstractProtocol
         return $array;
     }
 
-    public static function buildSnell($password, $server)
-    {
-        return [
-            'name' => $server['name'],
-            'type' => 'snell',
-            'server' => $server['host'],
-            'port' => (int) $server['port'],
-            'psk' => data_get($server, 'password', $password),
-            'version' => (int) data_get($server, 'protocol_settings.version', 5),
-            // Mihomo's normal Snell UDP relay support. This is distinct from
-            // the server-side Snell v5 QUIC Proxy exposure.
-            'udp' => true,
-        ];
-    }
-
     public static function buildMieru($password, $server)
     {
         $protocol_settings = data_get($server, 'protocol_settings', []);
@@ -713,9 +693,9 @@ class ClashMeta extends AbstractProtocol
             'type' => 'mieru',
             'server' => $server['host'],
             'port' => $server['port'],
-            'username' => data_get($server, 'username', $password),
-            'password' => data_get($server, 'password', $password),
-            'transport' => strtoupper(data_get($server, 'runtime_binding.transport', data_get($protocol_settings, 'transport', 'TCP')))
+            'username' => $password,
+            'password' => $password,
+            'transport' => strtoupper(data_get($protocol_settings, 'transport', 'TCP'))
         ];
 
         // 如果配置了端口范围
