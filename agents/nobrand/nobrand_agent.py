@@ -666,6 +666,219 @@ def snell_meter_totals(state: dict[str, Any]) -> dict[str, dict[str, int]]:
     return result
 
 
+def nft_command(
+    args: list[str],
+    *,
+    input_text: str | None = None,
+    allow_fail: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    nft = shutil.which("nft")
+    if not nft:
+        raise RuntimeError("snell_meter=nft requires the nft command")
+
+    proc = subprocess.run(
+        [nft, *args],
+        input=input_text,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+
+    if proc.returncode != 0 and not allow_fail:
+        raise RuntimeError(f"nft command failed: rc={proc.returncode}")
+    return proc
+
+
+def read_snell_nft_meter() -> tuple[bool, bool, dict[str, dict[str, int]]]:
+    proc = nft_command(
+        ["-j", "list", "table", "inet", SNELL_METER_TABLE],
+        allow_fail=True,
+    )
+    if proc.returncode != 0:
+        return False, False, {}
+
+    try:
+        payload = json.loads(proc.stdout)
+    except Exception as exc:
+        raise RuntimeError("Snell nft meter returned invalid JSON") from exc
+
+    rows = payload.get("nftables")
+    if not isinstance(rows, list):
+        raise RuntimeError("Snell nft meter JSON has no nftables array")
+
+    owned = False
+    result: dict[str, dict[str, int]] = {}
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        counter = row.get("counter")
+        if not isinstance(counter, dict):
+            continue
+        if counter.get("family") != "inet" or counter.get("table") != SNELL_METER_TABLE:
+            continue
+
+        name = str(counter.get("name") or "")
+        if name == SNELL_METER_OWNER:
+            owned = True
+            continue
+
+        match = re.fullmatch(r"(s[0-9a-f]{16})_(up|down)", name)
+        if not match:
+            continue
+
+        instance_id, direction = match.groups()
+        byte_count = max(0, int(counter.get("bytes") or 0))
+        item = result.setdefault(
+            instance_id,
+            {"upload_bytes": 0, "download_bytes": 0},
+        )
+        if direction == "up":
+            item["upload_bytes"] = byte_count
+        else:
+            item["download_bytes"] = byte_count
+
+    return True, owned, result
+
+
+def render_snell_nft_meter_ruleset(desired_ports: dict[str, int]) -> str:
+    lines = [
+        f"table inet {SNELL_METER_TABLE} {{",
+        f"  counter {SNELL_METER_OWNER} {{ }}",
+    ]
+
+    for instance_id in sorted(desired_ports):
+        lines.append(f"  counter {instance_id}_up {{ }}")
+        lines.append(f"  counter {instance_id}_down {{ }}")
+
+    lines.extend([
+        "  chain xboard_input {",
+        "    type filter hook input priority 300; policy accept;",
+    ])
+    for instance_id, port in sorted(desired_ports.items()):
+        lines.append(
+            f"    ct state established tcp dport {int(port)} "
+            f"counter name {instance_id}_up"
+        )
+    lines.extend([
+        "  }",
+        "  chain xboard_output {",
+        "    type filter hook output priority 300; policy accept;",
+    ])
+    for instance_id, port in sorted(desired_ports.items()):
+        lines.append(
+            f"    ct state established tcp sport {int(port)} "
+            f"counter name {instance_id}_down"
+        )
+    lines.extend([
+        "  }",
+        "}",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def desired_snell_meter_ports(
+    states: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for name, state in states.items():
+        if not MANAGED_SNELL_RE.fullmatch(name):
+            continue
+        if not bool(state.get("enabled", True)):
+            continue
+
+        instance_id = str(state.get("instance_id") or "")
+        if not re.fullmatch(r"s[0-9a-f]{16}", instance_id):
+            continue
+
+        port = int(state.get("listen_port") or 0)
+        if not 1 <= port <= 65535:
+            continue
+
+        result[instance_id] = port
+
+    return result
+
+
+def remove_owned_snell_meter_table(exists: bool, owned: bool) -> None:
+    if not exists:
+        return
+    if not owned:
+        raise RuntimeError(
+            f"refusing to modify unowned nft table inet {SNELL_METER_TABLE}"
+        )
+    nft_command(["delete", "table", "inet", SNELL_METER_TABLE])
+
+
+def sync_snell_nft_meter(
+    mode: str,
+    states: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, int]]:
+    desired_ports = desired_snell_meter_ports(states)
+    previous = load_snell_meter_state()
+    previous_instances = previous.get("instances")
+    if not isinstance(previous_instances, dict):
+        previous_instances = {}
+    previous_ports = {
+        str(instance_id): int(item.get("port") or 0)
+        for instance_id, item in previous_instances.items()
+        if isinstance(item, dict)
+    }
+
+    if mode == "off":
+        if shutil.which("nft"):
+            exists, owned, current = read_snell_nft_meter()
+            previous = advance_snell_meter_state(previous, current, desired_ports)
+            if exists and owned:
+                remove_owned_snell_meter_table(exists, owned)
+            elif exists and not owned:
+                raise RuntimeError(
+                    f"unowned nft table inet {SNELL_METER_TABLE} blocks Snell meter"
+                )
+        else:
+            previous = advance_snell_meter_state(previous, {}, desired_ports)
+
+        previous = reset_snell_meter_raw(previous, desired_ports)
+        save_snell_meter_state(previous)
+        return {}
+
+    if mode != "nft":
+        raise RuntimeError(f"unsupported Snell meter mode: {mode}")
+
+    exists, owned, current = read_snell_nft_meter()
+    if exists and not owned:
+        raise RuntimeError(
+            f"refusing to take over unowned nft table inet {SNELL_METER_TABLE}"
+        )
+
+    state = advance_snell_meter_state(previous, current, desired_ports)
+    needs_rebuild = (not exists) or previous_ports != desired_ports
+
+    if not desired_ports:
+        if exists:
+            remove_owned_snell_meter_table(exists, owned)
+        state = reset_snell_meter_raw(state, {})
+        save_snell_meter_state(state)
+        return {}
+
+    if needs_rebuild:
+        if exists:
+            remove_owned_snell_meter_table(exists, owned)
+        nft_command(
+            ["-f", "-"],
+            input_text=render_snell_nft_meter_ruleset(desired_ports),
+        )
+        state = reset_snell_meter_raw(state, desired_ports)
+
+    save_snell_meter_state(state)
+    return snell_meter_totals(state)
+
+
 def snell_platform_supported() -> bool:
     machine = os.uname().machine.lower()
     return machine in {"x86_64", "amd64", "aarch64", "arm64"}
@@ -907,6 +1120,21 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
         if MANAGED_SNELL_RE.fullmatch(name) and name not in desired_snell_names:
             delete_snell_instance(name)
 
+    latest_snell_states = load_snell_states()
+    snell_meter_totals_map = sync_snell_nft_meter(cfg.snell_meter, latest_snell_states)
+
+    for binding in snell_bindings:
+        instance_id = str(binding.get("instance_id") or "")
+        totals = snell_meter_totals_map.get(instance_id)
+        if totals:
+            meta = binding.setdefault("runtime_meta", {})
+            meta["snell_l3_meter"] = {
+                "mode": "nft",
+                "experimental": True,
+                "accounting_enabled": False,
+                **totals,
+            }
+
     bindings = mieru_bindings + snell_bindings
     traffic_readings: list[dict[str, Any]] = []
     managed_node_ids = sorted({
@@ -942,6 +1170,7 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
         "managed_users": managed_users,
         "bindings": len(bindings),
         "traffic_readings": len(traffic_readings),
+        "snell_meter_readings": len(snell_meter_totals_map),
     }
 
 
@@ -962,6 +1191,8 @@ def report_status(
         "managed_users": int(stats.get("managed_users", 0)),
         "bindings": int(stats.get("bindings", 0)),
         "traffic_readings": int(stats.get("traffic_readings", 0)),
+        "snell_meter_mode": cfg.snell_meter,
+        "snell_meter_readings": int(stats.get("snell_meter_readings", 0)),
         "reconcile_ms": max(0, int(reconcile_ms)),
     }
     api_post(cfg, "/api/v2/server/machine/nobrand-status", payload)
