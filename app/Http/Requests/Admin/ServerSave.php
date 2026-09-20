@@ -102,6 +102,10 @@ class ServerSave extends FormRequest
             'transport' => 'required|string|in:TCP,UDP',
             'traffic_pattern' => 'string',
         ],
+        'snell' => [
+            'version' => 'required|integer|in:5',
+            'quic' => 'nullable|boolean',
+        ],
         'anytls' => [
             'tls' => 'nullable|array',
             'alpn' => 'nullable|string',
