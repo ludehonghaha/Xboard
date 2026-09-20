@@ -757,6 +757,21 @@
                 '<div class="xnb-command"><div class="xnb-row"><label>已有 HY2</label><select id="xnb-hy2-existing" class="xnb-select"></select></div>' +
                 '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-warn" id="xnb-drop-hy2">删除所选逻辑节点</button></div></div>' +
               '</section>' +
+              '<section class="xnb-card">' +
+                '<h3>TUIC v5 Multi-User</h3>' +
+                '<div class="xnb-muted" style="margin-bottom:10px">每个逻辑节点一个 NoBrand TUIC 实例；实例内每个 Xboard 用户使用 NoBrand 生成的独立 UUID + Password，面板加密保存。</div>' +
+                '<div class="xnb-row"><label>节点名称</label><input id="xnb-tuic-name" class="xnb-input" placeholder="例如 NoBrand-TUIC-JP"></div>' +
+                '<div class="xnb-row"><label>Display Host</label><input id="xnb-tuic-host" class="xnb-input" placeholder="客户端连接入口 IP / 域名"></div>' +
+                '<div class="xnb-row"><label>UDP 端口</label><input id="xnb-tuic-port" class="xnb-input" type="number" min="1025" max="65535" value="23038"></div>' +
+                '<div class="xnb-row"><label>SNI</label><input id="xnb-tuic-sni" class="xnb-input" placeholder="例如 www.microsoft.com"></div>' +
+                '<div class="xnb-row"><label>Hybrid 机器</label><select id="xnb-tuic-machine" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>权限组</label><select id="xnb-tuic-group" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>Ingress Profile</label><input id="xnb-tuic-ingress" class="xnb-input" placeholder="留空=NoBrand 默认入口"></div>' +
+                '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-primary" id="xnb-create-tuic">创建 TUIC v5</button></div>' +
+                '<div id="xnb-tuic-msg" class="xnb-status"></div>' +
+                '<div class="xnb-command"><div class="xnb-row"><label>已有 TUIC</label><select id="xnb-tuic-existing" class="xnb-select"></select></div>' +
+                '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-warn" id="xnb-drop-tuic">删除所选逻辑节点</button></div></div>' +
+              '</section>' +
             '</div>' +
           '</div>';
 
@@ -766,6 +781,7 @@
         let nodes = [];
         let snellNodes = [];
         let hy2Nodes = [];
+        let tuicNodes = [];
         let groups = [];
         let capabilities = null;
 
@@ -786,6 +802,10 @@
         const hy2GroupSelect = overlay.querySelector('#xnb-hy2-group');
         const hy2ExistingSelect = overlay.querySelector('#xnb-hy2-existing');
         const hy2Msg = overlay.querySelector('#xnb-hy2-msg');
+        const tuicMachineSelect = overlay.querySelector('#xnb-tuic-machine');
+        const tuicGroupSelect = overlay.querySelector('#xnb-tuic-group');
+        const tuicExistingSelect = overlay.querySelector('#xnb-tuic-existing');
+        const tuicMsg = overlay.querySelector('#xnb-tuic-msg');
 
         const setMsg = (element, message, isError = false) => {
           element.textContent = message || '';
@@ -853,6 +873,7 @@
               ' · Snell Meter ' + escapeHtml(nbStatus.snell_meter_mode || 'off') +
               '/' + Number(nbStatus.snell_meter_readings || 0) +
               ' · HY2 Clients ' + Number(nbStatus.hy2_clients || 0) +
+              ' · TUIC Users ' + Number(nbStatus.tuic_users || 0) +
               ' · ' + Number(nbStatus.reconcile_ms || 0) + ' ms</span></div>';
 
             if (nbState === 'error' && nbStatus.message) {
@@ -905,6 +926,7 @@
             nodes = allNodes.filter((item) => item.type === 'mieru');
             snellNodes = allNodes.filter((item) => item.type === 'snell');
             hy2Nodes = allNodes.filter((item) => item.type === 'hysteria' && item.runtime_driver === 'nobrand');
+            tuicNodes = allNodes.filter((item) => item.type === 'tuic' && item.runtime_driver === 'nobrand');
             groups = Array.isArray(groupData) ? groupData : (groupData?.data || []);
             capabilities = capData || {};
 
@@ -925,13 +947,20 @@
             );
             setSelectOptions(hy2GroupSelect, groups, (item) => item.name + ' (#' + item.id + ')');
             setSelectOptions(hy2ExistingSelect, hy2Nodes, (item) => item.name + ' (#' + item.id + ')');
+            setSelectOptions(
+              tuicMachineSelect,
+              machines.filter((item) => (item.agent_driver || 'xboard-node') === 'nobrand-hybrid'),
+              (item) => item.name + ' (#' + item.id + ')'
+            );
+            setSelectOptions(tuicGroupSelect, groups, (item) => item.name + ' (#' + item.id + ')');
+            setSelectOptions(tuicExistingSelect, tuicNodes, (item) => item.name + ' (#' + item.id + ')');
 
             const cap = overlay.querySelector('#xnb-cap');
             cap.innerHTML =
-              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 5) + '</span>' +
+              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 6) + '</span>' +
               '<span class="xnb-badge">NoBrand ' + escapeHtml(capabilities.version || 'v3.2.2') + '</span>' +
-              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.5.0') + '</span>' +
-              '<span class="xnb-muted">自动 Runtime：Mieru / Snell v5 / Hysteria2 Multi-Auth</span>';
+              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.6.0') + '</span>' +
+              '<span class="xnb-muted">自动 Runtime：Mieru / Snell v5 / Hysteria2 / TUIC v5</span>';
 
             renderMachine();
             renderNode();
@@ -1147,6 +1176,61 @@
             await load();
           } catch (error) {
             setMsg(hy2Msg, error?.message || '删除失败', true);
+          }
+        };
+
+        overlay.querySelector('#xnb-create-tuic').onclick = async () => {
+          const name = overlay.querySelector('#xnb-tuic-name').value.trim();
+          const host = overlay.querySelector('#xnb-tuic-host').value.trim();
+          const port = Number(overlay.querySelector('#xnb-tuic-port').value || 0);
+          const sni = overlay.querySelector('#xnb-tuic-sni').value.trim();
+          const machineId = Number(tuicMachineSelect.value || 0);
+          const groupId = Number(tuicGroupSelect.value || 0);
+          const ingress = overlay.querySelector('#xnb-tuic-ingress').value.trim();
+
+          if (!name || !host || !sni || !machineId || !groupId || port < 1025 || port > 65535) {
+            return setMsg(tuicMsg, '请填写节点名、Display Host、UDP 端口、SNI，并选择 Hybrid 机器和权限组', true);
+          }
+
+          setMsg(tuicMsg, '正在创建…');
+          try {
+            const result = await noBrandAdminApi('server/manage/createNoBrandTuic', {
+              method: 'POST',
+              body: JSON.stringify({
+                name,
+                host,
+                server_port: port,
+                sni,
+                machine_id: machineId,
+                group_ids: [groupId],
+                ingress_profile: ingress || null,
+                rate: 1
+              })
+            });
+            setMsg(tuicMsg, 'TUIC v5 逻辑节点已创建 #' + (result.id || ''));
+            overlay.querySelector('#xnb-tuic-name').value = '';
+            await load();
+          } catch (error) {
+            setMsg(tuicMsg, error?.message || '创建失败', true);
+          }
+        };
+
+        overlay.querySelector('#xnb-drop-tuic').onclick = async () => {
+          const id = Number(tuicExistingSelect.value || 0);
+          const item = tuicNodes.find((node) => Number(node.id) === id);
+          if (!item) return setMsg(tuicMsg, '请选择要删除的 TUIC 逻辑节点', true);
+          if (!window.confirm('删除 ' + item.name + '？Companion 下一轮只会移除带本地 Xboard ownership 记录的 TUIC 实例。')) return;
+
+          setMsg(tuicMsg, '正在删除…');
+          try {
+            await noBrandAdminApi('server/manage/drop', {
+              method: 'POST',
+              body: JSON.stringify({ id })
+            });
+            setMsg(tuicMsg, 'TUIC 逻辑节点已删除；Companion 将清理 Xboard-owned 实例');
+            await load();
+          } catch (error) {
+            setMsg(tuicMsg, error?.message || '删除失败', true);
           }
         };
 
