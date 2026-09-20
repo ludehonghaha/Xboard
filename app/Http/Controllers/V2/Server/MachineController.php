@@ -135,7 +135,9 @@ class MachineController extends Controller
         }
 
         $params = $request->validate([
-            'bindings' => 'required|array|max:5000',
+            'node_ids' => 'present|array|max:1000',
+            'node_ids.*' => 'integer|min:1',
+            'bindings' => 'present|array|max:5000',
             'bindings.*.node_id' => 'required|integer',
             'bindings.*.user_id' => 'required|integer',
             'bindings.*.remote_user' => 'required|string|max:128',
@@ -147,22 +149,24 @@ class MachineController extends Controller
             'bindings.*.runtime_meta' => 'nullable|array',
         ]);
 
-        $nodeIds = collect($params['bindings'])
-            ->pluck('node_id')
+        $nodeIds = collect($params['node_ids'])
+            ->merge(collect($params['bindings'])->pluck('node_id'))
             ->map(fn ($id) => (int) $id)
             ->unique()
             ->values();
 
-        $nodes = Server::query()
-            ->where('machine_id', $machine->id)
-            ->where('runtime_driver', 'nobrand')
-            ->whereIn('type', [Server::TYPE_MIERU, Server::TYPE_SNELL])
-            ->whereIn('id', $nodeIds)
-            ->get()
-            ->keyBy('id');
+        $nodes = $nodeIds->isEmpty()
+            ? collect()
+            : Server::query()
+                ->where('machine_id', $machine->id)
+                ->where('runtime_driver', 'nobrand')
+                ->whereIn('type', [Server::TYPE_MIERU, Server::TYPE_SNELL])
+                ->whereIn('id', $nodeIds)
+                ->get()
+                ->keyBy('id');
 
         if ($nodes->count() !== $nodeIds->count()) {
-            abort(422, 'Binding references a node not owned by this NoBrand Hybrid machine');
+            abort(422, 'Binding snapshot references a node not owned by this NoBrand Hybrid machine');
         }
 
         $userIds = collect($params['bindings'])
@@ -171,18 +175,45 @@ class MachineController extends Controller
             ->unique()
             ->values();
 
-        $existingUserIds = User::query()
-            ->whereIn('id', $userIds)
-            ->pluck('id')
-            ->map(fn ($id) => (int) $id);
+        if ($userIds->isNotEmpty()) {
+            $existingUserIds = User::query()
+                ->whereIn('id', $userIds)
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id);
 
-        if ($existingUserIds->count() !== $userIds->count()) {
-            abort(422, 'Binding references an unknown Xboard user');
+            if ($existingUserIds->count() !== $userIds->count()) {
+                abort(422, 'Binding snapshot references an unknown Xboard user');
+            }
         }
 
         $syncedAt = now()->timestamp;
 
-        DB::transaction(function () use ($params, $syncedAt) {
+        DB::transaction(function () use ($params, $nodeIds, $syncedAt) {
+            $bindingsByNode = collect($params['bindings'])->groupBy(
+                fn ($binding) => (int) $binding['node_id']
+            );
+
+            // node_ids makes this endpoint an authoritative snapshot for the
+            // listed NoBrand nodes. Missing bindings are stale and must not
+            // remain available to subscription rendering.
+            foreach ($nodeIds as $nodeId) {
+                $reportedUserIds = collect($bindingsByNode->get($nodeId, []))
+                    ->pluck('user_id')
+                    ->map(fn ($id) => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $stale = NoBrandUserBinding::query()
+                    ->where('server_id', (int) $nodeId);
+
+                if (!empty($reportedUserIds)) {
+                    $stale->whereNotIn('user_id', $reportedUserIds);
+                }
+
+                $stale->delete();
+            }
+
             foreach ($params['bindings'] as $binding) {
                 $record = NoBrandUserBinding::query()->firstOrNew([
                     'server_id' => (int) $binding['node_id'],
@@ -217,6 +248,7 @@ class MachineController extends Controller
         return response()->json([
             'data' => true,
             'synced_at' => $syncedAt,
+            'node_count' => $nodeIds->count(),
             'count' => count($params['bindings']),
         ]);
     }
