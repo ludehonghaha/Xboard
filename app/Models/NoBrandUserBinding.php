@@ -15,6 +15,7 @@ class NoBrandUserBinding extends Model
         'display_port' => 'integer',
         'enabled' => 'boolean',
         'runtime_meta' => 'array',
+        'credential_payload' => 'encrypted:array',
         'last_synced_at' => 'integer',
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp',
