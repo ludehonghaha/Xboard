@@ -1,8 +1,6 @@
 <?php
 namespace App\Services;
 
-use App\Models\CommissionLog;
-use App\Models\Order;
 use App\Models\Server;
 use App\Models\Stat;
 use App\Models\StatServer;
@@ -53,31 +51,17 @@ class StatisticalService
             $endAt = strtotime('+1 day', $startAt);
         }
         $data = [];
-        $data['order_count'] = Order::where('created_at', '>=', $startAt)
-            ->where('created_at', '<', $endAt)
-            ->count();
-        $data['order_total'] = Order::where('created_at', '>=', $startAt)
-            ->where('created_at', '<', $endAt)
-            ->sum('total_amount');
-        $data['paid_count'] = Order::where('paid_at', '>=', $startAt)
-            ->where('paid_at', '<', $endAt)
-            ->whereNotIn('status', [0, 2])
-            ->count();
-        $data['paid_total'] = Order::where('paid_at', '>=', $startAt)
-            ->where('paid_at', '<', $endAt)
-            ->whereNotIn('status', [0, 2])
-            ->sum('total_amount');
-        $commissionLogBuilder = CommissionLog::where('created_at', '>=', $startAt)
-            ->where('created_at', '<', $endAt);
-        $data['commission_count'] = $commissionLogBuilder->count();
-        $data['commission_total'] = $commissionLogBuilder->sum('get_amount');
+        // Commerce/referral metrics are compatibility-only in Lite.
+        $data['order_count'] = 0;
+        $data['order_total'] = 0;
+        $data['paid_count'] = 0;
+        $data['paid_total'] = 0;
+        $data['commission_count'] = 0;
+        $data['commission_total'] = 0;
         $data['register_count'] = User::where('created_at', '>=', $startAt)
             ->where('created_at', '<', $endAt)
             ->count();
-        $data['invite_count'] = User::where('created_at', '>=', $startAt)
-            ->where('created_at', '<', $endAt)
-            ->whereNotNull('invite_user_id')
-            ->count();
+        $data['invite_count'] = 0;
         $data['transfer_used_total'] = StatServer::where('created_at', '>=', $startAt)
             ->where('created_at', '<', $endAt)
             ->select(DB::raw('SUM(u) + SUM(d) as total'))
@@ -315,25 +299,7 @@ class StatisticalService
 
     private function buildInviteRank($limit)
     {
-        $stats = User::select([
-            'invite_user_id',
-            DB::raw('count(*) as count')
-        ])
-            ->where('created_at', '>=', $this->startAt)
-            ->where('created_at', '<', $this->endAt)
-            ->whereNotNull('invite_user_id')
-            ->groupBy('invite_user_id')
-            ->orderBy('count', 'DESC')
-            ->limit($limit)
-            ->get();
-
-        $users = User::whereIn('id', $stats->pluck('invite_user_id')->toArray())->get()->keyBy('id');
-        foreach ($stats as $k => $v) {
-            if (!isset($users[$v['invite_user_id']]))
-                continue;
-            $stats[$k]['email'] = $users[$v['invite_user_id']]['email'];
-        }
-        return $stats;
+        return collect();
     }
 
     private function buildUserConsumptionRank($limit)
