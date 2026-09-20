@@ -27,8 +27,8 @@ class ManageController extends Controller
         }
 
         $type = $params['type'] ?? $existing?->type;
-        if (!in_array($type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)) {
-            return [422, 'NoBrand Agent 当前仅开放 Mieru / Snell / Hysteria2 Runtime'];
+        if (!in_array($type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC], true)) {
+            return [422, 'NoBrand Agent 当前仅开放 Mieru / Snell / Hysteria2 / TUIC v5 Runtime'];
         }
 
         $settings = $params['runtime_driver_settings']
@@ -108,6 +108,34 @@ class ManageController extends Controller
             $port = (int) ($params['server_port'] ?? $existing?->server_port ?? 0);
             if ($port < 1 || $port > 65535) {
                 return [422, 'NoBrand Hysteria2 必须配置 UDP server_port'];
+            }
+        }
+
+        if ($type === Server::TYPE_TUIC) {
+            $protocolSettings = $params['protocol_settings']
+                ?? $existing?->protocol_settings
+                ?? [];
+
+            if ((int) data_get($protocolSettings, 'version', 5) !== 5) {
+                return [422, 'NoBrand TUIC Runtime 当前仅开放 v5'];
+            }
+
+            $sni = trim((string) data_get($protocolSettings, 'tls.server_name', ''));
+            if ($sni === '' || mb_strlen($sni) > 255) {
+                return [422, 'NoBrand TUIC v5 必须配置有效 SNI'];
+            }
+
+            $port = (int) ($params['server_port'] ?? $existing?->server_port ?? 0);
+            if ($port < 1025 || $port > 65535) {
+                return [422, 'NoBrand TUIC v5 server_port 必须为 1025-65535'];
+            }
+
+            if ((string) data_get($protocolSettings, 'congestion_control', 'cubic') !== 'cubic') {
+                return [422, 'NoBrand TUIC v5 当前固定 congestion_control=cubic'];
+            }
+
+            if ((string) data_get($protocolSettings, 'udp_relay_mode', 'native') !== 'native') {
+                return [422, 'NoBrand TUIC v5 当前固定 udp_relay_mode=native'];
             }
         }
 
@@ -295,6 +323,95 @@ class ManageController extends Controller
         } catch (\Exception $e) {
             Log::error($e);
             return $this->fail([500, '创建 NoBrand Hysteria2 节点失败']);
+        }
+    }
+
+    public function createNoBrandTuic(Request $request)
+    {
+        $params = $request->validate([
+            'name' => 'required|string|max:64',
+            'host' => 'required|string|max:255',
+            'server_port' => 'required|integer|min:1025|max:65535',
+            'sni' => 'required|string|max:255',
+            'machine_id' => 'required|integer',
+            'group_ids' => 'required|array|min:1',
+            'group_ids.*' => 'integer',
+            'ingress_profile' => 'nullable|string|max:128',
+            'rate' => 'nullable|numeric|min:0',
+        ]);
+
+        $groupIds = collect($params['group_ids'])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if (
+            $groupIds->isEmpty()
+            || ServerGroup::query()->whereIn('id', $groupIds)->count() !== $groupIds->count()
+        ) {
+            return $this->fail([422, '权限组无效']);
+        }
+
+        $runtimeSettings = array_filter([
+            'advertise_host' => trim((string) $params['host']),
+            'ingress_profile' => trim((string) ($params['ingress_profile'] ?? '')),
+        ], fn ($value) => $value !== '');
+
+        $protocolSettings = [
+            'version' => 5,
+            'congestion_control' => 'cubic',
+            'alpn' => ['h3'],
+            'udp_relay_mode' => 'native',
+            'tls' => [
+                'server_name' => trim((string) $params['sni']),
+                'allow_insecure' => true,
+            ],
+        ];
+
+        $candidate = [
+            'type' => Server::TYPE_TUIC,
+            'machine_id' => (int) $params['machine_id'],
+            'server_port' => (int) $params['server_port'],
+            'runtime_driver' => 'nobrand',
+            'runtime_driver_settings' => $runtimeSettings,
+            'protocol_settings' => $protocolSettings,
+        ];
+
+        if ($error = $this->validateRuntimeDriverBinding($candidate)) {
+            return $this->fail($error);
+        }
+
+        try {
+            $server = Server::create([
+                'type' => Server::TYPE_TUIC,
+                'name' => trim($params['name']),
+                'host' => trim($params['host']),
+                'port' => 1,
+                'server_port' => (int) $params['server_port'],
+                'group_ids' => $groupIds->map(fn ($id) => (string) $id)->all(),
+                'route_ids' => [],
+                'tags' => ['nobrand', 'tuic-v5', 'multi-user'],
+                'show' => true,
+                'enabled' => true,
+                'rate' => (float) ($params['rate'] ?? 1),
+                'sort' => ((int) Server::max('sort')) + 1,
+                'protocol_settings' => $protocolSettings,
+                'machine_id' => (int) $params['machine_id'],
+                'runtime_driver' => 'nobrand',
+                'runtime_driver_settings' => $runtimeSettings,
+                'transfer_enable' => 0,
+                'u' => 0,
+                'd' => 0,
+            ]);
+
+            return $this->success([
+                'id' => $server->id,
+                'name' => $server->name,
+                'type' => $server->type,
+            ]);
+        } catch (\Exception $e) {
+            Log::error($e);
+            return $this->fail([500, '创建 NoBrand TUIC v5 节点失败']);
         }
     }
 
