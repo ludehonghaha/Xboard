@@ -81,6 +81,78 @@
 
 <body>
   <div id="root"></div>
+
+  <script>
+    // Xboard Lite admin cleanup.
+    // The upstream admin UI is shipped as a compiled submodule, so removed
+    // product features are filtered here while their backend routes remain disabled.
+    (() => {
+      const hiddenLabels = new Set([
+        '订单管理', 'Order Management', 'Управление заказами', 'Заказы',
+        '优惠券管理', 'Coupon Management', 'Купоны',
+        '工单管理', 'Ticket Management', 'Тикеты',
+        '公告管理', 'Notice Management', 'Объявления', 'Управление уведомлениями',
+        '支付配置', 'Payment Configuration', 'Настройки оплаты', 'Платежные методы',
+        '分配订单', 'Assign Order',
+        'TA的订单', 'Orders',
+        'TA的邀请', 'Invites'
+      ]);
+
+      const hiddenColumnLabels = new Set([
+        '佣金', 'Commission'
+      ]);
+
+      const hideExactMenuItems = () => {
+        document.querySelectorAll('a,button,[role="menuitem"],li').forEach((node) => {
+          const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!hiddenLabels.has(text)) return;
+
+          const target =
+            node.closest('[role="menuitem"]') ||
+            node.closest('a') ||
+            node.closest('li') ||
+            node;
+
+          target.style.display = 'none';
+          target.setAttribute('data-xboard-lite-hidden', '1');
+        });
+      };
+
+      const hideRemovedColumns = () => {
+        document.querySelectorAll('table').forEach((table) => {
+          const headers = Array.from(table.querySelectorAll('thead th'));
+          headers.forEach((th, index) => {
+            const text = (th.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!hiddenColumnLabels.has(text)) return;
+
+            th.style.display = 'none';
+            table.querySelectorAll('tbody tr').forEach((row) => {
+              const cell = row.children[index];
+              if (cell) cell.style.display = 'none';
+            });
+          });
+        });
+      };
+
+      let scheduled = false;
+      const clean = () => {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          hideExactMenuItems();
+          hideRemovedColumns();
+        });
+      };
+
+      const observer = new MutationObserver(clean);
+      window.addEventListener('DOMContentLoaded', () => {
+        clean();
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+    })();
+  </script>
+
 </body>
 
 </html>
