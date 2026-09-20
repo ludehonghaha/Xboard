@@ -240,6 +240,12 @@ class MachineController extends Controller
             return $xboardCommand;
         }
 
-        return $xboardCommand . ' && ' . NoBrandDriver::managerBootstrapCommand();
+        return $xboardCommand
+            . ' && ' . NoBrandDriver::managerBootstrapCommand()
+            . ' && ' . NoBrandDriver::companionBootstrapCommand(
+                $panelUrl,
+                (int) $machine->id,
+                (string) $machine->token
+            );
     }
 }
