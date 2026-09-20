@@ -427,7 +427,7 @@ def reconcile_mieru(node: dict[str, Any]) -> list[dict[str, Any]]:
     return bindings
 
 
-def reconcile_once(cfg: Config) -> None:
+def reconcile_once(cfg: Config) -> dict[str, int]:
     desired = api_post(cfg, "/api/v2/server/machine/nobrand-nodes")
     nodes = desired.get("nodes")
     if not isinstance(nodes, list):
@@ -452,6 +452,37 @@ def reconcile_once(cfg: Config) -> None:
             "bindings": bindings,
         })
 
+    return {
+        "managed_nodes": len(mieru_nodes),
+        "managed_users": sum(
+            len(node.get("users") or [])
+            for node in mieru_nodes
+            if isinstance(node.get("users"), list)
+        ),
+        "bindings": len(bindings),
+    }
+
+
+def report_status(
+    cfg: Config,
+    state: str,
+    *,
+    message: str | None = None,
+    stats: dict[str, int] | None = None,
+    reconcile_ms: int = 0,
+) -> None:
+    stats = stats or {}
+    payload = {
+        "state": state,
+        "version": VERSION,
+        "message": (message or "")[:900] or None,
+        "managed_nodes": int(stats.get("managed_nodes", 0)),
+        "managed_users": int(stats.get("managed_users", 0)),
+        "bindings": int(stats.get("bindings", 0)),
+        "reconcile_ms": max(0, int(reconcile_ms)),
+    }
+    api_post(cfg, "/api/v2/server/machine/nobrand-status", payload)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Xboard NoBrand companion")
@@ -474,16 +505,45 @@ def main() -> int:
     signal.signal(signal.SIGINT, stop_handler)
 
     if args.once:
-        reconcile_once(cfg)
-        return 0
+        started = time.monotonic()
+        try:
+            stats = reconcile_once(cfg)
+            report_status(
+                cfg,
+                "ok",
+                stats=stats,
+                reconcile_ms=int((time.monotonic() - started) * 1000),
+            )
+            return 0
+        except Exception as exc:
+            try:
+                report_status(
+                    cfg,
+                    "error",
+                    message=str(exc),
+                    reconcile_ms=int((time.monotonic() - started) * 1000),
+                )
+            except Exception:
+                pass
+            raise
 
     log(f"starting v{VERSION}; poll_interval={cfg.poll_interval}s")
 
     while not STOP:
         started = time.monotonic()
         try:
-            reconcile_once(cfg)
+            stats = reconcile_once(cfg)
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            try:
+                report_status(cfg, "ok", stats=stats, reconcile_ms=elapsed_ms)
+            except Exception as status_exc:
+                log(f"status report failed: {status_exc}")
         except Exception as exc:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            try:
+                report_status(cfg, "error", message=str(exc), reconcile_ms=elapsed_ms)
+            except Exception:
+                pass
             log(f"reconcile failed: {exc}")
 
         elapsed = time.monotonic() - started
