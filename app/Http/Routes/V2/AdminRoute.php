@@ -68,9 +68,6 @@ class AdminRoute
                 $router->get('/getNodes', [ManageController::class, 'getNodes']);
                 $router->post('/update', [ManageController::class, 'update']);
                 $router->post('/save', [ManageController::class, 'save']);
-                $router->post('/createNoBrandSnell', [ManageController::class, 'createNoBrandSnell']);
-                $router->post('/createNoBrandHy2', [ManageController::class, 'createNoBrandHy2']);
-                $router->post('/createNoBrandTuic', [ManageController::class, 'createNoBrandTuic']);
                 $router->post('/drop', [ManageController::class, 'drop']);
                 $router->post('/copy', [ManageController::class, 'copy']);
                 $router->post('/sort', [ManageController::class, 'sort']);
@@ -91,7 +88,6 @@ class AdminRoute
                 $router->post('/resetToken', [MachineController::class, 'resetToken']);
                 $router->get('/getToken', [MachineController::class, 'getToken']);
                 $router->get('/installCommand', [MachineController::class, 'installCommand']);
-                $router->get('/nobrandCapabilities', [MachineController::class, 'nobrandCapabilities']);
                 $router->get('/nodes', [MachineController::class, 'nodes']);
                 $router->get('/history', [MachineController::class, 'history']);
             });
