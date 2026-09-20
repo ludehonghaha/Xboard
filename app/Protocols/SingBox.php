@@ -20,6 +20,7 @@ class SingBox extends AbstractProtocol
         Server::TYPE_ANYTLS,
         Server::TYPE_SOCKS,
         Server::TYPE_HTTP,
+        Server::TYPE_SNELL,
     ];
     private $config;
     const CUSTOM_TEMPLATE_FILE = 'resources/rules/custom.sing-box.json';
@@ -176,6 +177,9 @@ class SingBox extends AbstractProtocol
             if ($item['type'] === Server::TYPE_HTTP) {
                 $httpConfig = $this->buildHttp($this->user['uuid'], $item);
                 $proxies[] = $httpConfig;
+            }
+            if ($item['type'] === Server::TYPE_SNELL) {
+                $proxies[] = $this->buildSnell($item['password'], $item);
             }
         }
         foreach ($outbounds as &$outbound) {
@@ -787,6 +791,22 @@ class SingBox extends AbstractProtocol
         $this->appendEch($array['tls'], data_get($protocol_settings, 'tls.ech'));
 
         return $array;
+    }
+
+    protected function buildSnell($password, $server): array
+    {
+        $major = (int) data_get($server, 'protocol_settings.version', 5);
+
+        return [
+            'type' => 'snell',
+            'tag' => $server['name'],
+            'server' => $server['host'],
+            'server_port' => (int) $server['port'],
+            // sing-box currently expresses the v5 non-QUIC compatible wire
+            // format using outbound version 4, matching NoBrand's exporter.
+            'version' => $major === 5 ? 4 : $major,
+            'psk' => data_get($server, 'password', $password),
+        ];
     }
 
     protected function buildSocks($password, $server): array
