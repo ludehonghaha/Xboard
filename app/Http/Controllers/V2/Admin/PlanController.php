@@ -4,7 +4,6 @@ namespace App\Http\Controllers\V2\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\PlanSave;
-use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -70,9 +69,6 @@ class PlanController extends Controller
 
     public function drop(Request $request)
     {
-        if (Order::where('plan_id', $request->input('id'))->first()) {
-            return $this->fail([400201, '该订阅下存在订单无法删除']);
-        }
         if (User::where('plan_id', $request->input('id'))->first()) {
             return $this->fail([400201, '该订阅下存在用户无法删除']);
         }
