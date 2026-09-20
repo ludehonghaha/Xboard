@@ -299,8 +299,22 @@
               copy.className = 'xli-action';
               copy.textContent = '复制';
               copy.onclick = async () => {
-                await navigator.clipboard.writeText(item.code || '');
-                setMessage('已复制 ' + (item.code || ''));
+                const text = item.code || '';
+                try {
+                  if (!navigator.clipboard || !window.isSecureContext) throw new Error('clipboard unavailable');
+                  await navigator.clipboard.writeText(text);
+                } catch (_) {
+                  const textarea = document.createElement('textarea');
+                  textarea.value = text;
+                  textarea.setAttribute('readonly', '');
+                  textarea.style.position = 'fixed';
+                  textarea.style.opacity = '0';
+                  document.body.appendChild(textarea);
+                  textarea.select();
+                  document.execCommand('copy');
+                  textarea.remove();
+                }
+                setMessage('已复制 ' + text);
               };
               actionTd.appendChild(copy);
 
