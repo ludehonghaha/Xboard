@@ -62,15 +62,15 @@ class NoBrandDriverTest extends TestCase
         $this->assertStringContainsString('--token', $command);
     }
 
-    public function test_capabilities_are_explicit_about_phase_two_boundary(): void
+    public function test_capabilities_are_explicit_about_phase_three_boundary(): void
     {
         $capabilities = NoBrandDriver::capabilities();
 
         $this->assertFalse($capabilities['vendored']);
         $this->assertTrue($capabilities['companion_required']);
         $this->assertTrue($capabilities['companion_implemented']);
-        $this->assertSame('0.2.0', $capabilities['companion_version']);
-        $this->assertSame(2, $capabilities['phase']);
+        $this->assertSame('0.3.0', $capabilities['companion_version']);
+        $this->assertSame(3, $capabilities['phase']);
 
         $this->assertContains('snell', $capabilities['upstream_protocols']);
         $this->assertNotContains('snell', $capabilities['panel_runtime_types']);
