@@ -11,15 +11,12 @@ use Illuminate\Support\Facades\Cache;
 class LoginService
 {
     /**
-     * 处理用户登录
+     * Password login for Xboard Lite.
      *
-     * @param string $email 用户邮箱
-     * @param string $password 用户密码
-     * @return array [成功状态, 用户对象或错误信息]
+     * @return array{0: bool, 1: mixed}
      */
     public function login(string $email, string $password): array
     {
-        // 检查密码错误限制
         if ((int) admin_setting('password_limit_enable', true)) {
             $passwordErrorCount = (int) Cache::get(CacheKey::get('PASSWORD_ERROR_LIMIT', $email), 0);
             if ($passwordErrorCount >= (int) admin_setting('password_limit_count', 5)) {
@@ -35,61 +32,37 @@ class LoginService
             }
         }
 
-        // 查找用户
         $user = User::byEmail($email)->first();
         if (!$user) {
             return [false, [400, __('Incorrect email or password')]];
         }
 
-        // 验证密码
-        if (
-            !Helper::multiPasswordVerify(
-                $user->password_algo,
-                $user->password_salt,
-                $password,
-                $user->password
-            )
-        ) {
-            // 增加密码错误计数
+        if (!Helper::multiPasswordVerify(
+            $user->password_algo,
+            $user->password_salt,
+            $password,
+            $user->password
+        )) {
             if ((int) admin_setting('password_limit_enable', true)) {
                 $passwordErrorCount = (int) Cache::get(CacheKey::get('PASSWORD_ERROR_LIMIT', $email), 0);
                 Cache::put(
                     CacheKey::get('PASSWORD_ERROR_LIMIT', $email),
-                    (int) $passwordErrorCount + 1,
+                    $passwordErrorCount + 1,
                     60 * (int) admin_setting('password_limit_expire', 60)
                 );
             }
+
             return [false, [400, __('Incorrect email or password')]];
         }
 
-        // 检查账户状态
         if ($user->banned) {
             return [false, [400, __('Your account has been suspended')]];
         }
 
-        // 更新最后登录时间
         $user->last_login_at = time();
         $user->save();
 
         HookManager::call('user.login.after', $user);
         return [true, $user];
-    }
-
-
-        $code = Helper::guid();
-        $key = CacheKey::get('TEMP_TOKEN', $code);
-
-        Cache::put($key, $user->id, 60);
-
-        $redirect = $redirect ?: 'dashboard';
-        $loginRedirect = '/#/login?verify=' . $code . '&redirect=' . rawurlencode($redirect);
-
-        if (admin_setting('app_url')) {
-            $url = admin_setting('app_url') . $loginRedirect;
-        } else {
-            $url = url($loginRedirect);
-        }
-
-        return $url;
     }
 }
