@@ -84,9 +84,7 @@ class PlanController extends Controller
     public function update(Request $request)
     {
         $updateData = $request->only([
-            'show',
-            'renew',
-            'sell'
+            'show'
         ]);
 
         $plan = Plan::find($request->input('id'));
