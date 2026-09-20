@@ -742,6 +742,21 @@
                 '<div class="xnb-command"><div class="xnb-row"><label>已有 Snell</label><select id="xnb-snell-existing" class="xnb-select"></select></div>' +
                 '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-warn" id="xnb-drop-snell">删除所选逻辑节点</button></div></div>' +
               '</section>' +
+              '<section class="xnb-card">' +
+                '<h3>Hysteria2 Multi-Auth</h3>' +
+                '<div class="xnb-muted" style="margin-bottom:10px">一台机器一个 UDP listener；每个 Xboard 用户使用独立 Auth。NoBrand 负责 Runtime/TLS/Salamander，Companion 只覆盖 clients[]。</div>' +
+                '<div class="xnb-row"><label>节点名称</label><input id="xnb-hy2-name" class="xnb-input" placeholder="例如 NoBrand-HY2-JP"></div>' +
+                '<div class="xnb-row"><label>Display Host</label><input id="xnb-hy2-host" class="xnb-input" placeholder="客户端连接入口 IP / 域名"></div>' +
+                '<div class="xnb-row"><label>UDP 端口</label><input id="xnb-hy2-port" class="xnb-input" type="number" min="1" max="65535" value="23037"></div>' +
+                '<div class="xnb-row"><label>SNI</label><input id="xnb-hy2-sni" class="xnb-input" placeholder="例如 www.nvidia.com"></div>' +
+                '<div class="xnb-row"><label>Hybrid 机器</label><select id="xnb-hy2-machine" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>权限组</label><select id="xnb-hy2-group" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>Ingress Profile</label><input id="xnb-hy2-ingress" class="xnb-input" placeholder="留空=NoBrand 默认入口"></div>' +
+                '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-primary" id="xnb-create-hy2">创建 Hysteria2</button></div>' +
+                '<div id="xnb-hy2-msg" class="xnb-status"></div>' +
+                '<div class="xnb-command"><div class="xnb-row"><label>已有 HY2</label><select id="xnb-hy2-existing" class="xnb-select"></select></div>' +
+                '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-warn" id="xnb-drop-hy2">删除所选逻辑节点</button></div></div>' +
+              '</section>' +
             '</div>' +
           '</div>';
 
@@ -750,6 +765,7 @@
         let machines = [];
         let nodes = [];
         let snellNodes = [];
+        let hy2Nodes = [];
         let groups = [];
         let capabilities = null;
 
@@ -766,6 +782,10 @@
         const snellGroupSelect = overlay.querySelector('#xnb-snell-group');
         const snellExistingSelect = overlay.querySelector('#xnb-snell-existing');
         const snellMsg = overlay.querySelector('#xnb-snell-msg');
+        const hy2MachineSelect = overlay.querySelector('#xnb-hy2-machine');
+        const hy2GroupSelect = overlay.querySelector('#xnb-hy2-group');
+        const hy2ExistingSelect = overlay.querySelector('#xnb-hy2-existing');
+        const hy2Msg = overlay.querySelector('#xnb-hy2-msg');
 
         const setMsg = (element, message, isError = false) => {
           element.textContent = message || '';
@@ -883,6 +903,7 @@
             const allNodes = Array.isArray(nodeData) ? nodeData : (nodeData?.data || []);
             nodes = allNodes.filter((item) => item.type === 'mieru');
             snellNodes = allNodes.filter((item) => item.type === 'snell');
+            hy2Nodes = allNodes.filter((item) => item.type === 'hysteria' && item.runtime_driver === 'nobrand');
             groups = Array.isArray(groupData) ? groupData : (groupData?.data || []);
             capabilities = capData || {};
 
@@ -896,13 +917,20 @@
             );
             setSelectOptions(snellGroupSelect, groups, (item) => item.name + ' (#' + item.id + ')');
             setSelectOptions(snellExistingSelect, snellNodes, (item) => item.name + ' (#' + item.id + ')');
+            setSelectOptions(
+              hy2MachineSelect,
+              machines.filter((item) => (item.agent_driver || 'xboard-node') === 'nobrand-hybrid'),
+              (item) => item.name + ' (#' + item.id + ')'
+            );
+            setSelectOptions(hy2GroupSelect, groups, (item) => item.name + ' (#' + item.id + ')');
+            setSelectOptions(hy2ExistingSelect, hy2Nodes, (item) => item.name + ' (#' + item.id + ')');
 
             const cap = overlay.querySelector('#xnb-cap');
             cap.innerHTML =
-              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 4) + '</span>' +
+              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 5) + '</span>' +
               '<span class="xnb-badge">NoBrand ' + escapeHtml(capabilities.version || 'v3.2.2') + '</span>' +
-              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.4.1') + '</span>' +
-              '<span class="xnb-muted">自动 Runtime：Mieru / Snell v5</span>';
+              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.5.0') + '</span>' +
+              '<span class="xnb-muted">自动 Runtime：Mieru / Snell v5 / Hysteria2 Multi-Auth</span>';
 
             renderMachine();
             renderNode();
@@ -1063,6 +1091,61 @@
             await load();
           } catch (error) {
             setMsg(snellMsg, error?.message || '删除失败', true);
+          }
+        };
+
+        overlay.querySelector('#xnb-create-hy2').onclick = async () => {
+          const name = overlay.querySelector('#xnb-hy2-name').value.trim();
+          const host = overlay.querySelector('#xnb-hy2-host').value.trim();
+          const port = Number(overlay.querySelector('#xnb-hy2-port').value || 0);
+          const sni = overlay.querySelector('#xnb-hy2-sni').value.trim();
+          const machineId = Number(hy2MachineSelect.value || 0);
+          const groupId = Number(hy2GroupSelect.value || 0);
+          const ingress = overlay.querySelector('#xnb-hy2-ingress').value.trim();
+
+          if (!name || !host || !sni || !machineId || !groupId || port < 1 || port > 65535) {
+            return setMsg(hy2Msg, '请填写节点名、Display Host、UDP 端口、SNI，并选择 Hybrid 机器和权限组', true);
+          }
+
+          setMsg(hy2Msg, '正在创建…');
+          try {
+            const result = await noBrandAdminApi('server/manage/createNoBrandHy2', {
+              method: 'POST',
+              body: JSON.stringify({
+                name,
+                host,
+                server_port: port,
+                sni,
+                machine_id: machineId,
+                group_ids: [groupId],
+                ingress_profile: ingress || null,
+                rate: 1
+              })
+            });
+            setMsg(hy2Msg, 'Hysteria2 Multi-Auth 逻辑节点已创建 #' + (result.id || ''));
+            overlay.querySelector('#xnb-hy2-name').value = '';
+            await load();
+          } catch (error) {
+            setMsg(hy2Msg, error?.message || '创建失败', true);
+          }
+        };
+
+        overlay.querySelector('#xnb-drop-hy2').onclick = async () => {
+          const id = Number(hy2ExistingSelect.value || 0);
+          const item = hy2Nodes.find((node) => Number(node.id) === id);
+          if (!item) return setMsg(hy2Msg, '请选择要删除的 Hysteria2 逻辑节点', true);
+          if (!window.confirm('删除 ' + item.name + '？如果该 Runtime 由 Xboard Companion 创建，下一轮会安全移除对应 NoBrand HY2 Runtime。')) return;
+
+          setMsg(hy2Msg, '正在删除…');
+          try {
+            await noBrandAdminApi('server/manage/drop', {
+              method: 'POST',
+              body: JSON.stringify({ id })
+            });
+            setMsg(hy2Msg, 'Hysteria2 逻辑节点已删除；Companion 将按 ownership marker 清理 Runtime');
+            await load();
+          } catch (error) {
+            setMsg(hy2Msg, error?.message || '删除失败', true);
           }
         };
 
