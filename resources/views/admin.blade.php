@@ -757,6 +757,7 @@
         const nodeSelect = overlay.querySelector('#xnb-node');
         const nodeMachineSelect = overlay.querySelector('#xnb-node-machine');
         const driverSelect = overlay.querySelector('#xnb-agent-driver');
+        const machineSnellMeterSelect = overlay.querySelector('#xnb-machine-snell-meter');
         const runtimeSelect = overlay.querySelector('#xnb-runtime');
         const machineMsg = overlay.querySelector('#xnb-machine-msg');
         const nodeMsg = overlay.querySelector('#xnb-node-msg');
@@ -801,6 +802,11 @@
           }
 
           driverSelect.value = item.agent_driver || 'xboard-node';
+          const agentSettings = item.agent_settings && typeof item.agent_settings === 'object'
+            ? item.agent_settings
+            : {};
+          machineSnellMeterSelect.value = agentSettings.snell_meter || 'off';
+          machineSnellMeterSelect.disabled = driverSelect.value !== 'nobrand-hybrid';
 
           const now = Date.now() / 1000;
           const online = item.last_seen_at && (now - Number(item.last_seen_at) < 180);
@@ -906,6 +912,9 @@
         };
 
         machineSelect.onchange = renderMachine;
+        driverSelect.onchange = () => {
+          machineSnellMeterSelect.disabled = driverSelect.value !== 'nobrand-hybrid';
+        };
         nodeSelect.onchange = renderNode;
         runtimeSelect.onchange = () => {
           fields.style.display = runtimeSelect.value === 'nobrand' ? '' : 'none';
@@ -916,6 +925,10 @@
           if (!item) return setMsg(machineMsg, '请选择机器', true);
           setMsg(machineMsg, '正在保存…');
           try {
+            const nextAgentSettings = {
+              ...(item.agent_settings && typeof item.agent_settings === 'object' ? item.agent_settings : {}),
+              snell_meter: machineSnellMeterSelect.value || 'off'
+            };
             await noBrandAdminApi('server/machine/save', {
               method: 'POST',
               body: JSON.stringify({
@@ -924,7 +937,7 @@
                 notes: item.notes ?? null,
                 is_active: item.is_active !== false,
                 agent_driver: driverSelect.value,
-                agent_settings: item.agent_settings ?? null
+                agent_settings: nextAgentSettings
               })
             });
             setMsg(machineMsg, '机器 Agent 模式已保存');
