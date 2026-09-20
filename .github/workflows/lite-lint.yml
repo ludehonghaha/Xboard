@@ -1,0 +1,21 @@
+name: Xboard Lite PHP Lint
+
+on:
+  push:
+    branches:
+      - xboard-lite-v1
+  workflow_dispatch:
+
+jobs:
+  php-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP version
+        run: php -v
+      - name: Lint PHP sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          find app routes config database plugins-core -type f -name '*.php' -print0 \
+            | xargs -0 -n1 php -l
