@@ -56,7 +56,7 @@ Native machine discovery intentionally excludes NoBrand-owned nodes so both runt
 
 ## Phase 4 status
 
-Current companion version: `0.4.0`.
+Current companion version: `0.4.1`.
 
 Implemented panel/runtime protocols:
 
@@ -70,7 +70,7 @@ Implemented infrastructure:
 - Node `runtime_driver`: `native | nobrand`
 - Node `runtime_driver_settings`
 - Exact NoBrand v3.2.2 manager bootstrap with checksum verification
-- Standalone Xboard NoBrand Companion `0.4.0`
+- Standalone Xboard NoBrand Companion `0.4.1`
 - Companion systemd installer
 - Machine-auth desired-state endpoint:
   - native: `POST /api/v2/server/machine/nodes`
@@ -223,6 +223,37 @@ Verified Phase 4 output:
 - sing-box: NoBrand-compatible v5 non-QUIC wire representation using outbound `version: 4`
 
 Phase 4 does **not** invent a generic Snell URI. Clients whose Xboard renderer has no verified Snell representation simply do not receive the Snell node.
+
+### Experimental Snell L3 meter
+
+Companion 0.4.1 includes an opt-in `snell_meter=nft` observer. It is **off by default** and is not connected to Xboard allowance deduction.
+
+When enabled it creates only:
+
+```text
+table inet xboard_nobrand_meter
+```
+
+The table contains the ownership marker `xboard_owner_v1`. The companion refuses to modify a same-named table without that marker.
+
+For every managed Snell TCP listener it counts established client-side network bytes:
+
+- input TCP destination port -> experimental upload counter
+- output TCP source port -> experimental download counter
+
+Raw nft counters are persisted into a monotonic root-only cumulative state at:
+
+```text
+/var/lib/xboard-nobrand-agent/snell-meter.json
+```
+
+A ruleset/counter reset starts a new raw epoch while preserving cumulative totals. These are L3 network-byte measurements and include transport/network overhead, so they are exposed only as runtime metadata/health in 0.4.1 and are **not billing-authoritative**.
+
+Enable only for acceptance testing:
+
+```text
+--snell-meter nft
+```
 
 ### Snell limitations
 
