@@ -48,17 +48,32 @@ class NoBrandDriverTest extends TestCase
         NoBrandDriver::assertActionAllowed('shell.exec');
     }
 
-    public function test_capabilities_are_explicit_about_phase_one_boundary(): void
+    public function test_companion_bootstrap_uses_structured_installer_arguments(): void
+    {
+        $command = NoBrandDriver::companionBootstrapCommand(
+            'https://panel.example.com/',
+            7,
+            'machine-token'
+        );
+
+        $this->assertStringContainsString(NoBrandDriver::COMPANION_INSTALLER_URL, $command);
+        $this->assertStringContainsString('--machine-id 7', $command);
+        $this->assertStringContainsString('--panel', $command);
+        $this->assertStringContainsString('--token', $command);
+    }
+
+    public function test_capabilities_are_explicit_about_phase_two_boundary(): void
     {
         $capabilities = NoBrandDriver::capabilities();
 
         $this->assertFalse($capabilities['vendored']);
         $this->assertTrue($capabilities['companion_required']);
-        $this->assertFalse($capabilities['companion_implemented']);
-        $this->assertSame(1, $capabilities['phase']);
+        $this->assertTrue($capabilities['companion_implemented']);
+        $this->assertSame('0.2.0', $capabilities['companion_version']);
+        $this->assertSame(2, $capabilities['phase']);
 
         $this->assertContains('snell', $capabilities['upstream_protocols']);
         $this->assertNotContains('snell', $capabilities['panel_runtime_types']);
-        $this->assertContains('mieru', $capabilities['panel_runtime_types']);
+        $this->assertSame(['mieru'], $capabilities['implemented_runtime_protocols']);
     }
 }
