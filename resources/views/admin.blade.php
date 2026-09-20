@@ -95,11 +95,15 @@
         '支付配置', 'Payment Configuration', 'Настройки оплаты', 'Платежные методы',
         '分配订单', 'Assign Order',
         'TA的订单', 'Orders',
-        'TA的邀请', 'Invites'
+        'TA的邀请', 'Invites',
+        '发送邮件', 'Send Email'
       ]);
 
       const hiddenColumnLabels = new Set([
-        '佣金', 'Commission'
+        '佣金', 'Commission',
+        '新购', 'New Purchase',
+        '续费', 'Renew',
+        '价格', 'Price'
       ]);
 
       const hiddenPanelLabels = new Set([
@@ -109,7 +113,25 @@
         '总订单', 'Total Orders',
         '待处理工单', 'Pending Tickets',
         '待处理佣金', 'Pending Commission',
-        '收入概览', 'Revenue Overview', 'Income Overview'
+        '收入概览', 'Revenue Overview', 'Income Overview',
+        '价格设置', 'Pricing', 'Price Settings',
+        '财务信息', 'Financial Information',
+        '邀请信息', 'Invitation Information',
+        '邀请&佣金设置', 'Invitation & Commission Settings'
+      ]);
+
+      const hiddenFieldLabels = new Set([
+        '邀请人邮箱',
+        '佣金余额',
+        '佣金类型',
+        '推荐返利比例',
+        '专享折扣比例',
+        '注册试用',
+        '注册试用时长',
+        '货币单位',
+        '货币符号',
+        '邮箱验证',
+        '工单等待回复限制'
       ]);
 
       const hideExactMenuItems = () => {
@@ -142,6 +164,28 @@
               break;
             }
             target = parent;
+          }
+
+          target.style.display = 'none';
+          target.setAttribute('data-xboard-lite-hidden', '1');
+        });
+      };
+
+      const hideRemovedFields = () => {
+        document.querySelectorAll('label,span,p,div').forEach((node) => {
+          const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!hiddenFieldLabels.has(text)) return;
+
+          let target = node.closest('label') || node;
+          for (let i = 0; i < 4 && target.parentElement; i++) {
+            const parent = target.parentElement;
+            const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
+            const controls = parent.querySelectorAll('input,select,textarea,button,[role="switch"],[role="combobox"]').length;
+
+            target = parent;
+            if (controls > 0 && parentText.length < 500) {
+              break;
+            }
           }
 
           target.style.display = 'none';
@@ -374,6 +418,7 @@
           scheduled = false;
           hideExactMenuItems();
           hideRemovedPanels();
+          hideRemovedFields();
           hideRemovedColumns();
           ensureAccessInviteButton();
         });
