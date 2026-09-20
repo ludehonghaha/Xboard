@@ -157,6 +157,31 @@ def export_mieru_state() -> dict[str, Any] | None:
     return state
 
 
+def parse_mita_traffic_metrics(raw: str) -> tuple[int, int]:
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        raise RuntimeError("Mita metrics returned no JSON")
+
+    try:
+        payload = json.loads(raw[start:end + 1])
+    except Exception as exc:
+        raise RuntimeError("Mita metrics returned invalid JSON") from exc
+
+    traffic = payload.get("traffic")
+    if not isinstance(traffic, dict):
+        raise RuntimeError("Mita metrics has no traffic group")
+
+    upload = traffic.get("UploadBytes")
+    download = traffic.get("DownloadBytes")
+    if not isinstance(upload, int) or isinstance(upload, bool) or upload < 0:
+        raise RuntimeError("Mita UploadBytes is invalid")
+    if not isinstance(download, int) or isinstance(download, bool) or download < 0:
+        raise RuntimeError("Mita DownloadBytes is invalid")
+
+    return upload, download
+
+
 def read_instance_traffic_metrics(instance_id: str) -> tuple[int, int]:
     if not re.fullmatch(r"u[0-9a-f]{16}", instance_id):
         raise RuntimeError("invalid NoBrand Mieru instance id")
@@ -194,28 +219,10 @@ def read_instance_traffic_metrics(instance_id: str) -> tuple[int, int]:
         raise RuntimeError(f"Mita metrics failed for {instance_id}: rc={proc.returncode}")
 
     raw = (proc.stdout or "") + "\n" + (proc.stderr or "")
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start < 0 or end <= start:
-        raise RuntimeError(f"Mita metrics returned no JSON for {instance_id}")
-
     try:
-        payload = json.loads(raw[start:end + 1])
-    except Exception as exc:
-        raise RuntimeError(f"Mita metrics returned invalid JSON for {instance_id}") from exc
-
-    traffic = payload.get("traffic")
-    if not isinstance(traffic, dict):
-        raise RuntimeError(f"Mita metrics has no traffic group for {instance_id}")
-
-    upload = traffic.get("UploadBytes")
-    download = traffic.get("DownloadBytes")
-    if not isinstance(upload, int) or upload < 0:
-        raise RuntimeError(f"Mita UploadBytes is invalid for {instance_id}")
-    if not isinstance(download, int) or download < 0:
-        raise RuntimeError(f"Mita DownloadBytes is invalid for {instance_id}")
-
-    return upload, download
+        return parse_mita_traffic_metrics(raw)
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc} for {instance_id}") from exc
 
 
 def collect_traffic_readings(bindings: list[dict[str, Any]]) -> list[dict[str, Any]]:
