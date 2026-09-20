@@ -647,8 +647,8 @@ class ClashMeta extends AbstractProtocol
         if (data_get($protocol_settings, 'version') === 4) {
             $array['token'] = $password;
         } else {
-            $array['uuid'] = $password;
-            $array['password'] = $password;
+            $array['uuid'] = data_get($server, 'runtime_binding.uuid', $password);
+            $array['password'] = data_get($server, 'runtime_binding.password', data_get($server, 'password', $password));
         }
 
         $array['skip-cert-verify'] = (bool) data_get($protocol_settings, 'tls.allow_insecure', false);
