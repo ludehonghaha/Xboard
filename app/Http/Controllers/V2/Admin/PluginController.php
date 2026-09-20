@@ -33,14 +33,8 @@ class PluginController extends Controller
                 [
                     'value' => Plugin::TYPE_FEATURE,
                     'label' => '功能',
-                    'description' => '提供功能扩展的插件，如Telegram登录、邮件通知等',
+                    'description' => '提供功能扩展的插件，如 Telegram Bot 等',
                     'icon' => '🔧'
-                ],
-                [
-                    'value' => Plugin::TYPE_PAYMENT,
-                    'label' => '支付方式',
-                    'description' => '提供支付接口的插件，如支付宝、微信支付等',
-                    'icon' => '💳'
                 ]
             ]
         ]);
