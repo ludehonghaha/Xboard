@@ -91,7 +91,7 @@ class ServerService
         $noBrandDedicatedIds = $servers
             ->filter(fn (Server $server) =>
                 $server->runtime_driver === 'nobrand'
-                && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)
+                && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)
             )
             ->pluck('id')
             ->all();
@@ -109,7 +109,7 @@ class ServerService
             ->filter(function (Server $server) use ($bindings) {
                 if (
                     $server->runtime_driver !== 'nobrand'
-                    || !in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)
+                    || !in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)
                 ) {
                     return true;
                 }
@@ -122,7 +122,7 @@ class ServerService
             ->map(function (Server $server) use ($user, $bindings) {
                 if (
                     $server->runtime_driver === 'nobrand'
-                    && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)
+                    && in_array($server->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)
                 ) {
                     /** @var NoBrandUserBinding $binding */
                     $binding = $bindings->get($server->id);
@@ -138,8 +138,26 @@ class ServerService
 
                     if ($server->type === Server::TYPE_MIERU) {
                         $server->username = $binding->remote_user;
-                    } else {
+                    } elseif ($server->type === Server::TYPE_SNELL) {
                         $server->runtime_binding['instance_name'] = $binding->remote_user;
+                    } elseif ($server->type === Server::TYPE_HYSTERIA) {
+                        $meta = is_array($binding->runtime_meta) ? $binding->runtime_meta : [];
+                        $settings = is_array($server->protocol_settings) ? $server->protocol_settings : [];
+                        $settings['version'] = 2;
+                        $settings['tls'] = array_merge(
+                            is_array($settings['tls'] ?? null) ? $settings['tls'] : [],
+                            [
+                                'server_name' => (string) ($meta['sni'] ?? ''),
+                                'allow_insecure' => true,
+                            ]
+                        );
+                        $settings['obfs'] = [
+                            'open' => true,
+                            'type' => 'salamander',
+                            'password' => (string) ($meta['obfs'] ?? ''),
+                        ];
+                        $server->protocol_settings = $settings;
+                        $server->runtime_binding['client_name'] = $binding->remote_user;
                     }
                 } else {
                     // 判断动态端口
