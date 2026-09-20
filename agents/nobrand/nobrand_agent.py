@@ -29,15 +29,20 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 MANAGED_USER_RE = re.compile(r"^xb[1-9][0-9]*$")
 ALLOWED_TRANSPORTS = {"TCP", "UDP"}
 ALLOWED_PROFILES = {"iplc", "balanced", "stealth"}
 ALLOWED_MULTIPLEXING = {"off", "low", "middle", "high"}
 ALLOWED_HANDSHAKES = {"no-wait", "standard"}
+
+MITA_BIN = "/usr/local/lib/nobrand-oneclick/bin/mita"
+MITA_INSTANCES_DIR = "/etc/mita/instances"
+MITA_INSTANCE_RUN_DIR = "/run/mita-instances"
 
 STOP = False
 
@@ -150,6 +155,89 @@ def export_mieru_state() -> dict[str, Any] | None:
     if not isinstance(state, dict):
         raise RuntimeError("nobrand user-export returned non-object JSON")
     return state
+
+
+def read_instance_traffic_metrics(instance_id: str) -> tuple[int, int]:
+    if not re.fullmatch(r"u[0-9a-f]{16}", instance_id):
+        raise RuntimeError("invalid NoBrand Mieru instance id")
+
+    config_path = os.path.join(MITA_INSTANCES_DIR, instance_id, "server.json")
+    socket_path = os.path.join(MITA_INSTANCE_RUN_DIR, instance_id + ".sock")
+
+    if not os.path.isfile(MITA_BIN):
+        raise RuntimeError("managed Mita runtime is unavailable")
+    if not os.path.isfile(config_path):
+        raise RuntimeError(f"Mita config is unavailable for {instance_id}")
+    if not os.path.exists(socket_path):
+        raise RuntimeError(f"Mita management socket is unavailable for {instance_id}")
+
+    env = os.environ.copy()
+    env.update({
+        "MITA_CONFIG_JSON_FILE": config_path,
+        "MITA_UDS_PATH": socket_path,
+        "MITA_LOG_NO_TIMESTAMP": "1",
+    })
+
+    proc = subprocess.run(
+        [MITA_BIN, "get", "metrics"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+        env=env,
+    )
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"Mita metrics failed for {instance_id}: rc={proc.returncode}")
+
+    raw = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        raise RuntimeError(f"Mita metrics returned no JSON for {instance_id}")
+
+    try:
+        payload = json.loads(raw[start:end + 1])
+    except Exception as exc:
+        raise RuntimeError(f"Mita metrics returned invalid JSON for {instance_id}") from exc
+
+    traffic = payload.get("traffic")
+    if not isinstance(traffic, dict):
+        raise RuntimeError(f"Mita metrics has no traffic group for {instance_id}")
+
+    upload = traffic.get("UploadBytes")
+    download = traffic.get("DownloadBytes")
+    if not isinstance(upload, int) or upload < 0:
+        raise RuntimeError(f"Mita UploadBytes is invalid for {instance_id}")
+    if not isinstance(download, int) or download < 0:
+        raise RuntimeError(f"Mita DownloadBytes is invalid for {instance_id}")
+
+    return upload, download
+
+
+def collect_traffic_readings(bindings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    readings: list[dict[str, Any]] = []
+
+    for binding in bindings:
+        if not bool(binding.get("enabled", True)):
+            continue
+
+        instance_id = str(binding.get("instance_id") or "")
+        if not instance_id:
+            continue
+
+        upload, download = read_instance_traffic_metrics(instance_id)
+        readings.append({
+            "user_id": int(binding["user_id"]),
+            "instance_id": instance_id,
+            "upload_bytes": upload,
+            "download_bytes": download,
+        })
+
+    return readings
 
 
 def runtime_settings(node: dict[str, Any]) -> dict[str, Any]:
@@ -447,10 +535,21 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
     if mieru_nodes:
         bindings.extend(reconcile_mieru(mieru_nodes[0]))
 
+    traffic_readings: list[dict[str, Any]] = []
+
     if bindings:
         api_post(cfg, "/api/v2/server/machine/nobrand-bindings", {
             "bindings": bindings,
         })
+
+        traffic_readings = collect_traffic_readings(bindings)
+        if traffic_readings and mieru_nodes:
+            api_post(cfg, "/api/v2/server/machine/nobrand-traffic", {
+                "node_id": int(mieru_nodes[0]["id"]),
+                "report_id": uuid.uuid4().hex,
+                "observed_at": int(time.time()),
+                "readings": traffic_readings,
+            })
 
     return {
         "managed_nodes": len(mieru_nodes),
@@ -460,6 +559,7 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
             if isinstance(node.get("users"), list)
         ),
         "bindings": len(bindings),
+        "traffic_readings": len(traffic_readings),
     }
 
 
