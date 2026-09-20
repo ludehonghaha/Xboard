@@ -461,3 +461,36 @@ else:
     raise SystemExit("[FAIL] HY2 client name did not match user_id")
 
 print("[PASS] HY2 desired-state and drift smoke tests")
+
+
+hy2_owner = {
+    "version": 1,
+    "node_id": 21,
+    "managed_by": "xboard-nobrand-agent",
+    "node_spec": agent.hy2_node_parameters(hy2_node),
+}
+assert_equal(
+    agent.hy2_owner_matches_node(hy2_owner, hy2_node),
+    True,
+    "HY2 owner marker matches the requested panel spec",
+)
+
+hy2_node_changed_ingress = json.loads(json.dumps(hy2_node))
+hy2_node_changed_ingress["runtime_driver_settings"]["ingress_profile"] = "other-profile"
+assert_equal(
+    agent.hy2_owner_matches_node(hy2_owner, hy2_node_changed_ingress),
+    False,
+    "HY2 requested ingress change is detected through owner spec",
+)
+
+hy2_state_resolved_ingress = {
+    **hy2_state,
+    "ingress_profile_id": "resolved-profile-id",
+}
+assert_equal(
+    agent.hy2_state_matches_node(hy2_node, hy2_state_resolved_ingress),
+    True,
+    "HY2 runtime-state check does not loop on ingress name-to-id resolution",
+)
+
+print("[PASS] HY2 owner-spec smoke tests")
