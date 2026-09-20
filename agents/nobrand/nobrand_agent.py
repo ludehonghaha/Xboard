@@ -2,11 +2,12 @@
 """
 Xboard Lite NoBrand companion.
 
-Phase 2 scope:
+Phase 4 scope:
 - Pull declarative NoBrand desired state from Xboard machine API.
 - Reconcile one NoBrand-managed Mieru node per machine.
-- Manage only Xboard-owned users named xb<user_id>.
-- Report per-user display endpoints back to Xboard.
+- Reconcile multiple Snell v5 logical nodes as isolated per-user instances.
+- Manage only reserved Xboard namespaces (xb<user_id>, xbn<node_id>u<user_id>).
+- Report per-user display endpoints and Mieru traffic back to Xboard.
 
 Security:
 - No shell=True.
@@ -33,8 +34,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 MANAGED_USER_RE = re.compile(r"^xb[1-9][0-9]*$")
+MANAGED_SNELL_RE = re.compile(r"^xbn([1-9][0-9]*)u([1-9][0-9]*)$")
 ALLOWED_TRANSPORTS = {"TCP", "UDP"}
 ALLOWED_PROFILES = {"iplc", "balanced", "stealth"}
 ALLOWED_MULTIPLEXING = {"off", "low", "middle", "high"}
@@ -43,6 +45,7 @@ ALLOWED_HANDSHAKES = {"no-wait", "standard"}
 MITA_BIN = "/usr/local/lib/nobrand-oneclick/bin/mita"
 MITA_INSTANCES_DIR = "/etc/mita/instances"
 MITA_INSTANCE_RUN_DIR = "/run/mita-instances"
+SNELL_STATE_DIR = "/var/lib/nobrand-oneclick/snell/instances"
 
 STOP = False
 
@@ -297,17 +300,30 @@ def desired_users(node: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not isinstance(users, list):
         return {}
 
+    node_type = str(node.get("type") or "")
+    expected_node_id = int(node.get("id") or 0)
     result: dict[str, dict[str, Any]] = {}
+
     for item in users:
         if not isinstance(item, dict):
             continue
+
         name = str(item.get("remote_user") or "")
-        if not MANAGED_USER_RE.fullmatch(name):
-            raise RuntimeError("panel returned an invalid reserved NoBrand username")
+        if node_type == "mieru":
+            if not MANAGED_USER_RE.fullmatch(name):
+                raise RuntimeError("panel returned an invalid reserved Mieru username")
+        elif node_type == "snell":
+            match = MANAGED_SNELL_RE.fullmatch(name)
+            if not match or int(match.group(1)) != expected_node_id:
+                raise RuntimeError("panel returned an invalid reserved Snell instance name")
+        else:
+            raise RuntimeError(f"unsupported desired user protocol: {node_type}")
+
         password = str(item.get("password") or "")
         if not password or len(password) > 256:
             raise RuntimeError("panel returned invalid NoBrand user credential")
         result[name] = item
+
     return result
 
 
@@ -522,6 +538,197 @@ def reconcile_mieru(node: dict[str, Any]) -> list[dict[str, Any]]:
     return bindings
 
 
+def load_snell_states() -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    if not os.path.isdir(SNELL_STATE_DIR):
+        return result
+
+    for entry in os.scandir(SNELL_STATE_DIR):
+        if not entry.is_file(follow_symlinks=False) or not entry.name.endswith(".json"):
+            continue
+
+        try:
+            with open(entry.path, "r", encoding="utf-8") as fh:
+                state = json.load(fh)
+        except Exception:
+            continue
+
+        if not isinstance(state, dict) or state.get("protocol") != "snell":
+            continue
+
+        name = str(state.get("name") or "")
+        if not MANAGED_SNELL_RE.fullmatch(name):
+            continue
+
+        instance_id = str(state.get("instance_id") or "")
+        if not re.fullmatch(r"s[0-9a-f]{16}", instance_id):
+            continue
+
+        result[name] = state
+
+    return result
+
+
+def delete_snell_instance(name: str) -> None:
+    if not MANAGED_SNELL_RE.fullmatch(name):
+        raise RuntimeError("refusing to delete non-Xboard Snell instance")
+    run_nb(["snell", "remove", "--name", name, "-y"])
+    log(f"removed managed Snell instance {name}")
+
+
+def install_snell_instance(node: dict[str, Any], desired: dict[str, Any]) -> None:
+    name = str(desired["remote_user"])
+    if not MANAGED_SNELL_RE.fullmatch(name):
+        raise RuntimeError("invalid managed Snell instance name")
+
+    protocol_settings = node.get("protocol_settings") or {}
+    version = int(protocol_settings.get("version") or 5)
+    if version != 5:
+        raise RuntimeError("NoBrand companion currently supports Snell v5 only")
+    if bool(protocol_settings.get("quic", False)):
+        raise RuntimeError("Snell v5 QUIC Proxy is not enabled by the companion")
+
+    args = [
+        "snell", "install",
+        "--name", name,
+        "--version", "5",
+        "--psk", str(desired["password"]),
+        "--quic", "off",
+        "--advertise-auto",
+        "-y",
+    ]
+
+    ingress = str(runtime_settings(node).get("ingress_profile") or "").strip()
+    if ingress:
+        args.extend(["--ingress-profile", ingress])
+
+    run_nb(args)
+    log(f"installed managed Snell v5 instance {name}")
+
+
+def set_snell_endpoint(name: str, host: str, port: int) -> None:
+    if not MANAGED_SNELL_RE.fullmatch(name):
+        raise RuntimeError("invalid managed Snell instance name")
+    if not host or not 1 <= port <= 65535:
+        raise RuntimeError("invalid Snell display endpoint")
+
+    run_nb([
+        "snell", "set-endpoint",
+        "--name", name,
+        "--advertise-host", host,
+        "--advertise-port", str(port),
+        "-y",
+    ])
+
+
+def snell_state_needs_recreate(
+    node: dict[str, Any],
+    desired: dict[str, Any],
+    current: dict[str, Any],
+) -> bool:
+    if int(current.get("version") or 0) != 5:
+        return True
+    if bool(current.get("quic_proxy_enabled", False)):
+        return True
+    if str(current.get("psk") or "") != str(desired["password"]):
+        return True
+
+    wanted_ingress = str(runtime_settings(node).get("ingress_profile") or "").strip()
+    current_ingress = str(current.get("ingress_profile_id") or "").strip()
+    if wanted_ingress and current_ingress != wanted_ingress:
+        return True
+
+    return False
+
+
+def reconcile_snell_node(
+    node: dict[str, Any],
+    all_states: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    desired = desired_users(node)
+    node_id = int(node["id"])
+
+    # The entire xbn<node>u<user> namespace is reserved for this logical node.
+    for name in sorted(list(all_states)):
+        match = MANAGED_SNELL_RE.fullmatch(name)
+        if match and int(match.group(1)) == node_id and name not in desired:
+            delete_snell_instance(name)
+            all_states.pop(name, None)
+
+    for name in sorted(desired):
+        wanted = desired[name]
+        current = all_states.get(name)
+
+        if current is not None and snell_state_needs_recreate(node, wanted, current):
+            delete_snell_instance(name)
+            all_states.pop(name, None)
+            current = None
+
+        if current is None:
+            install_snell_instance(node, wanted)
+            all_states = load_snell_states()
+            current = all_states.get(name)
+            if current is None:
+                raise RuntimeError(f"Snell install completed but state is unavailable for {name}")
+
+        listen_port = int(current.get("listen_port") or 0)
+        if not 1 <= listen_port <= 65535:
+            raise RuntimeError(f"invalid Snell listen port for {name}")
+
+        desired_host = str(runtime_settings(node).get("advertise_host") or node.get("host") or "")
+        advertise_mode = str(current.get("advertise_mode") or "auto")
+        current_host = str(current.get("advertise_host") or "")
+        current_port = int(current.get("advertise_port") or 0) if current.get("advertise_port") else 0
+
+        if desired_host and (
+            advertise_mode != "custom"
+            or current_host != desired_host
+            or current_port != listen_port
+        ):
+            set_snell_endpoint(name, desired_host, listen_port)
+            all_states = load_snell_states()
+            current = all_states.get(name) or current
+
+    bindings: list[dict[str, Any]] = []
+    latest = load_snell_states()
+    for name, wanted in desired.items():
+        current = latest.get(name)
+        if current is None:
+            continue
+
+        listen_port = int(current.get("listen_port") or 0)
+        display_port = int(current.get("advertise_port") or listen_port)
+        display_host = str(
+            current.get("advertise_host")
+            or runtime_settings(node).get("advertise_host")
+            or node.get("host")
+            or ""
+        )
+
+        if not 1 <= display_port <= 65535:
+            continue
+
+        bindings.append({
+            "node_id": node_id,
+            "user_id": int(wanted["user_id"]),
+            "remote_user": name,
+            "instance_id": str(current.get("instance_id") or "") or None,
+            "display_host": display_host or None,
+            "display_port": display_port,
+            "transport": "TCP",
+            "enabled": bool(current.get("enabled", True)),
+            "runtime_meta": {
+                "version": int(current.get("version") or 5),
+                "quic_proxy_enabled": bool(current.get("quic_proxy_enabled", False)),
+                "runtime_version": current.get("runtime_version"),
+                "runtime_status": current.get("runtime_status"),
+                "updated_at": current.get("updated_at"),
+            },
+        })
+
+    return bindings
+
+
 def reconcile_once(cfg: Config) -> dict[str, int]:
     desired = api_post(cfg, "/api/v2/server/machine/nobrand-nodes")
     nodes = desired.get("nodes")
@@ -532,16 +739,37 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
         node for node in nodes
         if isinstance(node, dict) and str(node.get("type") or "") == "mieru"
     ]
+    snell_nodes = [
+        node for node in nodes
+        if isinstance(node, dict) and str(node.get("type") or "") == "snell"
+    ]
 
     if len(mieru_nodes) > 1:
         raise RuntimeError(
-            "Phase 2 supports one NoBrand Mieru node per machine; split additional nodes across machines"
+            "only one NoBrand Mieru logical node is supported per machine"
         )
 
-    bindings: list[dict[str, Any]] = []
-    if mieru_nodes:
-        bindings.extend(reconcile_mieru(mieru_nodes[0]))
+    mieru_bindings: list[dict[str, Any]] = []
+    snell_bindings: list[dict[str, Any]] = []
 
+    if mieru_nodes:
+        mieru_bindings.extend(reconcile_mieru(mieru_nodes[0]))
+
+    snell_states = load_snell_states()
+    desired_snell_names: set[str] = set()
+    for node in snell_nodes:
+        desired_snell_names.update(desired_users(node).keys())
+        snell_bindings.extend(reconcile_snell_node(node, snell_states))
+        snell_states = load_snell_states()
+
+    # If an Xboard Snell logical node was deleted, its reserved instances no
+    # longer appear in desired state. Remove only our globally reserved xbn*
+    # namespace; manual NoBrand Snell names remain untouched.
+    for name in sorted(snell_states):
+        if MANAGED_SNELL_RE.fullmatch(name) and name not in desired_snell_names:
+            delete_snell_instance(name)
+
+    bindings = mieru_bindings + snell_bindings
     traffic_readings: list[dict[str, Any]] = []
 
     if bindings:
@@ -549,7 +777,8 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
             "bindings": bindings,
         })
 
-        traffic_readings = collect_traffic_readings(bindings)
+    if mieru_bindings:
+        traffic_readings = collect_traffic_readings(mieru_bindings)
         if traffic_readings and mieru_nodes:
             api_post(cfg, "/api/v2/server/machine/nobrand-traffic", {
                 "node_id": int(mieru_nodes[0]["id"]),
@@ -558,13 +787,16 @@ def reconcile_once(cfg: Config) -> dict[str, int]:
                 "readings": traffic_readings,
             })
 
+    managed_nodes = len(mieru_nodes) + len(snell_nodes)
+    managed_users = sum(
+        len(node.get("users") or [])
+        for node in (mieru_nodes + snell_nodes)
+        if isinstance(node.get("users"), list)
+    )
+
     return {
-        "managed_nodes": len(mieru_nodes),
-        "managed_users": sum(
-            len(node.get("users") or [])
-            for node in mieru_nodes
-            if isinstance(node.get("users"), list)
-        ),
+        "managed_nodes": managed_nodes,
+        "managed_users": managed_users,
         "bindings": len(bindings),
         "traffic_readings": len(traffic_readings),
     }
