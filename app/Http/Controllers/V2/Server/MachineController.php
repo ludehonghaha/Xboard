@@ -62,7 +62,7 @@ class MachineController extends Controller
             ->map(function (Server $node) {
                 $desiredUsers = [];
 
-                if (in_array($node->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)) {
+                if (in_array($node->type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA, Server::TYPE_TUIC], true)) {
                     $available = ServerService::getAvailableUsers($node);
                     $userIds = $available->pluck('id')->map(fn ($id) => (int) $id)->all();
 
@@ -84,6 +84,7 @@ class MachineController extends Controller
                                 'remote_user' => match ($node->type) {
                                     Server::TYPE_SNELL => 'xbn' . (int) $node->id . 'u' . $userId,
                                     Server::TYPE_HYSTERIA => 'xbh' . $userId,
+                                    Server::TYPE_TUIC => 'xbu' . $userId,
                                     default => 'xb' . $userId,
                                 },
                                 // Mieru password / Snell PSK reuse the existing
