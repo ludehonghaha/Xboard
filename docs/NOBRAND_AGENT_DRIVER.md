@@ -54,9 +54,9 @@ A node can be:
 
 Native machine discovery intentionally excludes NoBrand-owned nodes so both runtimes cannot own the same listener.
 
-## Phase 4 status
+## Phase 5 status
 
-Current companion version: `0.4.1`.
+Current companion version: `0.5.0`.
 
 Implemented panel/runtime protocols:
 
@@ -70,7 +70,7 @@ Implemented infrastructure:
 - Node `runtime_driver`: `native | nobrand`
 - Node `runtime_driver_settings`
 - Exact NoBrand v3.2.2 manager bootstrap with checksum verification
-- Standalone Xboard NoBrand Companion `0.4.1`
+- Standalone Xboard NoBrand Companion `0.5.0`
 - Companion systemd installer
 - Machine-auth desired-state endpoint:
   - native: `POST /api/v2/server/machine/nodes`
@@ -89,16 +89,16 @@ Implemented infrastructure:
 
 ## Runtime boundary
 
-The pinned NoBrand release exposes more products than Phase 4 implements.
+The pinned NoBrand release exposes more products than Phase 5 implements.
 
 The companion currently owns:
 
 - `mieru`
 - `snell` v5 with QUIC Proxy disabled
+- `hysteria` as Hysteria2 multi-auth
 
 Not yet implemented as NoBrand Xboard runtimes:
 
-- Hysteria2
 - TUIC v5
 - VLESS FinalMask/Sudoku
 - VLESS REALITY
@@ -109,7 +109,7 @@ Do not infer "supported upstream" as "implemented by the Xboard companion."
 
 ### Mieru machine boundary
 
-NoBrand Mieru uses one authoritative machine-level user state. Phase 4 therefore permits only one NoBrand Mieru logical node per machine.
+NoBrand Mieru uses one authoritative machine-level user state. Phase 5 therefore permits only one NoBrand Mieru logical node per machine.
 
 ### Snell machine boundary
 
@@ -177,7 +177,7 @@ NoBrand quota is **not** copied into every Mieru instance. Xboard remains the ac
 
 ## Snell v5 user model
 
-Snell has one PSK per server instance rather than a native multi-user identity model. Phase 4 therefore creates one isolated NoBrand Snell v5 instance for every Xboard user/node pair.
+Snell has one PSK per server instance rather than a native multi-user identity model. Phase 5 therefore creates one isolated NoBrand Snell v5 instance for every Xboard user/node pair.
 
 Reserved instance name:
 
@@ -216,13 +216,13 @@ Manual NoBrand Snell instances with other names remain outside Xboard ownership.
 
 ### Snell client output
 
-Verified Phase 4 output:
+Verified Phase 5 output:
 
 - Mihomo / Clash Meta: `type: snell`, v5, per-user PSK/port
 - Surge: standard Snell policy line with `version = 5`
 - sing-box: NoBrand-compatible v5 non-QUIC wire representation using outbound `version: 4`
 
-Phase 4 does **not** invent a generic Snell URI. Clients whose Xboard renderer has no verified Snell representation simply do not receive the Snell node.
+Phase 5 does **not** invent a generic Snell URI. Clients whose Xboard renderer has no verified Snell representation simply do not receive the Snell node.
 
 ### Experimental Snell L3 meter
 
@@ -257,7 +257,7 @@ Enable only for acceptance testing:
 
 ### Snell limitations
 
-Phase 4 deliberately keeps NoBrand Snell v5 QUIC Proxy disabled.
+Phase 5 deliberately keeps NoBrand Snell v5 QUIC Proxy disabled.
 
 Mihomo's ordinary `udp: true` Snell relay capability is not the same thing as the NoBrand server's v5 QUIC Proxy listener.
 
@@ -267,6 +267,73 @@ Xboard user expiry/banning/traffic eligibility still controls whether a Snell in
 
 Xboard `speed_limit` is also not yet translated into a NoBrand Snell per-instance rate control.
 
+## Hysteria2 multi-auth model
+
+NoBrand v3.2.2 manages Hysteria2 as one machine-level Xray listener. Xray itself supports multiple Hysteria2 clients, so Phase 5 uses:
+
+```text
+one NoBrand HY2 UDP listener
+  -> settings.clients[]
+      -> one Xboard UUID auth per eligible user
+```
+
+Xboard does not create one HY2 process per user.
+
+The Companion:
+
+1. Refuses to take over an existing unowned NoBrand HY2 runtime.
+2. Installs or reconfigures HY2 only when its Xboard ownership marker is present or the runtime is absent.
+3. Builds a candidate config by changing only `inbounds[0].settings.clients`.
+4. Verifies all other NoBrand fields are unchanged.
+5. Runs the pinned NoBrand Xray binary with `run -test -c` against the candidate.
+6. Atomically replaces the config.
+7. Restarts HY2.
+8. Restores the previous config and restarts again if the new runtime fails.
+9. Publishes one per-user subscription binding using the shared listener and each user's Xboard UUID as Auth.
+
+Reserved HY2 client metadata name:
+
+```text
+xbh<user_id>
+```
+
+The Xray email field is:
+
+```text
+xbh<user_id>@xboard.invalid
+```
+
+The local ownership marker is:
+
+```text
+/var/lib/xboard-nobrand-agent/hy2-owner.json
+```
+
+It records the Xboard logical node ID and the requested SNI / listener port / Display Host / Ingress selector. This prevents ingress profile names that resolve to internal NoBrand IDs from causing endless reconfiguration loops.
+
+If the last eligible Xboard user disappears, the Companion removes only an HY2 runtime carrying this Xboard ownership marker. A manually installed NoBrand HY2 runtime without the marker is left untouched.
+
+### HY2 subscription metadata
+
+The binding reports:
+
+- shared Display Host / UDP port
+- per-user UUID Auth
+- SNI
+- Salamander password
+- ALPN `h3`
+- `insecure=true`, matching NoBrand's self-signed certificate export
+
+Existing Xboard Hysteria2 renderers then produce the client configuration.
+
+### HY2 limitations
+
+- one NoBrand Hysteria2 logical node per machine;
+- no Hysteria2 traffic accounting is wired into Xboard yet;
+- Xboard `speed_limit` is not currently translated to a per-HY2-user bandwidth limit;
+- the NoBrand state file still contains its bootstrap Auth for its own lifecycle/share-link tooling, but the live Xray `clients[]` list is replaced with Xboard users;
+- an existing manually managed NoBrand HY2 runtime must be removed before Xboard can claim that runtime.
+
 ## Reconciliation ownership
 
 Reserved Xboard namespaces:
@@ -274,6 +341,7 @@ Reserved Xboard namespaces:
 ```text
 Mieru: xb<user_id>
 Snell: xbn<node_id>u<user_id>
+Hysteria2 metadata: xbh<user_id>
 ```
 
 The companion never treats arbitrary NoBrand object names as Xboard-owned resources.
@@ -330,6 +398,11 @@ Mieru:
 
 Snell:
 /var/lib/nobrand-oneclick/snell/instances/<instance_id>.json
+
+Hysteria2:
+/etc/nobrand-oneclick/hysteria2/config.json
+/var/lib/nobrand-oneclick/hysteria2/state.json
+/var/lib/xboard-nobrand-agent/hy2-owner.json
 ```
 
 ## Admin controls
@@ -341,6 +414,7 @@ The Lite Admin compatibility overlay provides:
 - Mieru Runtime assignment and settings
 - Snell v5 logical-node creation
 - Snell v5 logical-node deletion
+- Hysteria2 multi-auth logical-node creation/deletion
 - NoBrand companion health/status
 
 Snell creation asks for the logical node name, Display Host, Hybrid machine, permission group and optional Ingress Profile. Real per-user Snell ports are always supplied by companion bindings rather than the logical node placeholder.
@@ -353,7 +427,8 @@ Snell creation asks for the logical node name, Display Host, Hybrid machine, per
 - changing global Mieru protocol mode after deployment fails closed rather than automatically restarting all instances;
 - Snell is v5 only and QUIC Proxy is disabled;
 - Snell traffic accounting and Xboard speed-limit enforcement are not implemented yet;
-- Hysteria2/TUIC/VLESS/SSH/Forward NoBrand runtimes are not implemented yet;
+- TUIC/VLESS/SSH/Forward NoBrand runtimes are not implemented yet;
+- Hysteria2 traffic accounting and per-user speed enforcement are not implemented yet;
 - the compatibility Admin overlay should eventually be replaced by a source-built Lite frontend;
 - the companion installer currently follows the `xboard-lite-v1` branch and should be release/tag/checksum pinned before production rollout.
 
@@ -361,7 +436,8 @@ Snell creation asks for the logical node name, Display Host, Hybrid machine, per
 
 The highest-value next steps are:
 
-1. Find a reliable per-instance Snell byte-accounting source and integrate it without double counting.
-2. Add NoBrand Hysteria2/TUIC only after their ownership and accounting models are defined.
-3. Release-tag and checksum-pin the Xboard-owned companion itself.
-4. Replace the compiled-admin compatibility overlay with a native Lite Admin source build.
+1. Acceptance-test Hysteria2 multi-auth on a real NoBrand v3.2.2 host, including rollback.
+2. Find reliable accounting sources for Snell and Hysteria2 before enabling billing.
+3. Add NoBrand TUIC only after its ownership/accounting model is defined.
+4. Release-tag and checksum-pin the Xboard-owned companion itself.
+5. Replace the compiled-admin compatibility overlay with a native Lite Admin source build.
