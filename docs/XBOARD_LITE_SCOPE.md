@@ -118,3 +118,17 @@ Removed from the Lite admin API and UI:
 Legacy database columns are retained for migration compatibility, but the Lite user-management API neither exposes nor edits them.
 
 User filtering and sorting use a Lite allow-list so removed financial/referral fields cannot be queried through the admin user API.
+
+
+## NoBrand Hybrid Agent
+
+Xboard Lite has a Phase 1 external-driver contract for `ike-sh/NoBrand-OneClick`.
+
+- Upstream GPL source is not vendored into Xboard Lite.
+- The panel pins an exact upstream release and SHA-256.
+- Machines distinguish `xboard-node` from `nobrand-hybrid`.
+- Nodes distinguish `native` from `nobrand` runtime ownership.
+- Native machine discovery excludes NoBrand-owned nodes to avoid double ownership.
+- The NoBrand companion that executes local allow-listed CLI actions is not implemented yet.
+
+See [NOBRAND_AGENT_DRIVER.md](NOBRAND_AGENT_DRIVER.md).
