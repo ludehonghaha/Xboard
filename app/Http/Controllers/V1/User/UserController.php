@@ -4,13 +4,9 @@ namespace App\Http\Controllers\V1\User;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\User\UserChangePassword;
-use App\Http\Requests\User\UserTransfer;
 use App\Http\Requests\User\UserUpdate;
-use App\Models\Order;
 use App\Models\Plan;
-use App\Models\Ticket;
 use App\Models\User;
-use App\Services\Auth\LoginService;
 use App\Services\AuthService;
 use App\Services\Plugin\HookManager;
 use App\Services\UserService;
@@ -18,18 +14,9 @@ use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
 class UserController extends Controller
 {
-    protected $loginService;
-
-    public function __construct(
-        LoginService $loginService
-    ) {
-        $this->loginService = $loginService;
-    }
-
     public function getActiveSession(Request $request)
     {
         $user = $request->user();
@@ -98,10 +85,7 @@ class UserController extends Controller
                 'remind_traffic',
                 'expired_at',
                 'balance',
-                'commission_balance',
                 'plan_id',
-                'discount',
-                'commission_rate',
                 'telegram_id',
                 'uuid'
             ])
@@ -115,17 +99,9 @@ class UserController extends Controller
 
     public function getStat(Request $request)
     {
-        $stat = [
-            Order::where('status', 0)
-                ->where('user_id', $request->user()->id)
-                ->count(),
-            Ticket::where('status', 0)
-                ->where('user_id', $request->user()->id)
-                ->count(),
-            User::where('invite_user_id', $request->user()->id)
-                ->count()
-        ];
-        return $this->success($stat);
+        // Compatibility shape for the existing user frontend.
+        // Order / ticket / referral counters were removed in Xboard Lite.
+        return $this->success([0, 0, 0]);
     }
 
     public function getSubscribe(Request $request)
@@ -189,35 +165,4 @@ class UserController extends Controller
         return $this->success(true);
     }
 
-    public function transfer(UserTransfer $request)
-    {
-        $amount = $request->input('transfer_amount');
-        try {
-            DB::transaction(function () use ($request, $amount) {
-                $user = User::lockForUpdate()->find($request->user()->id);
-                if (!$user) {
-                    throw new \Exception(__('The user does not exist'));
-                }
-                if ($amount > $user->commission_balance) {
-                    throw new \Exception(__('Insufficient commission balance'));
-                }
-                $user->commission_balance -= $amount;
-                $user->balance += $amount;
-                if (!$user->save()) {
-                    throw new \Exception(__('Transfer failed'));
-                }
-            });
-        } catch (\Exception $e) {
-            return $this->fail([400, $e->getMessage()]);
-        }
-        return $this->success(true);
-    }
-
-    public function getQuickLoginUrl(Request $request)
-    {
-        $user = $request->user();
-
-        $url = $this->loginService->generateQuickLoginUrl($user, $request->input('redirect'));
-        return $this->success($url);
-    }
 }
