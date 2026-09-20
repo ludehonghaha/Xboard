@@ -166,11 +166,9 @@ class UserService
         // 可选字段
         $this->setOptionalFields($user, $data);
 
-        // 处理计划
+        // Plans are assigned explicitly by an administrator in Lite mode.
         if (isset($data['plan_id'])) {
             $this->setPlanForUser($user, $data['plan_id'], $data['expired_at'] ?? null);
-        } else {
-            $this->setTryOutPlan(user: $user);
         }
 
         return $user;
@@ -209,6 +207,7 @@ class UserService
         $user->group_id = $plan->group_id;
         $user->transfer_enable = $plan->transfer_enable * 1073741824;
         $user->speed_limit = $plan->speed_limit;
+        $user->device_limit = $plan->device_limit;
 
         if ($expiredAt) {
             $user->expired_at = $expiredAt;
@@ -216,12 +215,7 @@ class UserService
     }
 
     /**
-     * 为用户分配一个新套餐或续费现有套餐
-     *
-     * @param User $user 用户模型
-     * @param Plan $plan 套餐模型
-     * @param int $validityDays 购买天数
-     * @return User 更新后的用户模型
+     * Assign a service profile to a user and optionally extend its validity.
      */
     public function assignPlan(User $user, Plan $plan, int $validityDays): User
     {
@@ -254,22 +248,4 @@ class UserService
         return $user;
     }
 
-    /**
-     * 设置试用计划
-     */
-    private function setTryOutPlan(User $user): void
-    {
-        if (!(int) admin_setting('try_out_plan_id', 0))
-            return;
-
-        $plan = Plan::find(admin_setting('try_out_plan_id'));
-        if (!$plan)
-            return;
-
-        $user->transfer_enable = $plan->transfer_enable * 1073741824;
-        $user->plan_id = $plan->id;
-        $user->group_id = $plan->group_id;
-        $user->expired_at = time() + (admin_setting('try_out_hour', 1) * 3600);
-        $user->speed_limit = $plan->speed_limit;
-    }
-}
+}}
