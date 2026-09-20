@@ -31,15 +31,11 @@ class Kernel extends ConsoleKernel
         // v2board
         $schedule->command('xboard:statistics')->dailyAt('0:10')->onOneServer();
         // check
-        $schedule->command('check:order')->everyMinute()->onOneServer()->withoutOverlapping(5);
-        $schedule->command('check:commission')->everyMinute()->onOneServer()->withoutOverlapping(5);
-        $schedule->command('check:ticket')->everyMinute()->onOneServer()->withoutOverlapping(5);
         $schedule->command('check:traffic-exceeded')->everyMinute()->onOneServer()->withoutOverlapping(10)->runInBackground();
         // reset
         $schedule->command('reset:traffic')->everyMinute()->onOneServer()->withoutOverlapping(10);
         $schedule->command('reset:log')->daily()->onOneServer();
         // send
-        $schedule->command('send:remindMail', ['--force'])->dailyAt('11:30')->onOneServer();
         // horizon metrics
         $schedule->command('horizon:snapshot')->everyFiveMinutes()->onOneServer();
         // cleanup stale online_count (GC for Redis TTL expiration)
