@@ -27,8 +27,8 @@ class ManageController extends Controller
         }
 
         $type = $params['type'] ?? $existing?->type;
-        if (!in_array($type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)) {
-            return [422, 'NoBrand Agent 当前仅开放 Mieru / Snell Runtime'];
+        if (!in_array($type, [Server::TYPE_MIERU, Server::TYPE_SNELL, Server::TYPE_HYSTERIA], true)) {
+            return [422, 'NoBrand Agent 当前仅开放 Mieru / Snell / Hysteria2 Runtime'];
         }
 
         $settings = $params['runtime_driver_settings']
@@ -91,6 +91,16 @@ class ManageController extends Controller
             }
         }
 
+        if ($type === Server::TYPE_HYSTERIA) {
+            $protocolSettings = $params['protocol_settings']
+                ?? $existing?->protocol_settings
+                ?? [];
+
+            if ((int) data_get($protocolSettings, 'version', 2) !== 2) {
+                return [422, 'NoBrand Hysteria Runtime 仅支持 Hysteria2'];
+            }
+        }
+
         if (!$machineId) {
             return [422, 'NoBrand Runtime 节点必须绑定 NoBrand Hybrid 机器'];
         }
@@ -100,16 +110,17 @@ class ManageController extends Controller
             return [422, '所选机器未启用 NoBrand Hybrid Agent'];
         }
 
-        if ($type === Server::TYPE_MIERU) {
+        if (in_array($type, [Server::TYPE_MIERU, Server::TYPE_HYSTERIA], true)) {
             $duplicate = Server::query()
                 ->where('machine_id', $machineId)
                 ->where('runtime_driver', 'nobrand')
-                ->where('type', Server::TYPE_MIERU)
+                ->where('type', $type)
                 ->when($existing, fn ($query) => $query->where('id', '!=', $existing->id))
                 ->exists();
 
             if ($duplicate) {
-                return [422, '每台机器仅允许一个 NoBrand Mieru 逻辑节点'];
+                $label = $type === Server::TYPE_MIERU ? 'Mieru' : 'Hysteria2';
+                return [422, "每台机器仅允许一个 NoBrand {$label} 逻辑节点"];
             }
         }
 
