@@ -23,16 +23,16 @@ class AppController extends Controller
             ],
             'features' => [
                 'enable_register' => (bool) admin_setting('app_enable_register', true), // 是否开启注册功能
-                'enable_invite_system' => (bool) admin_setting('app_enable_invite_system', true), // 是否开启邀请系统
+                'enable_invite_system' => false, // legacy referral system removed in Lite // 是否开启邀请系统
                 'enable_telegram_bot' => (bool) admin_setting('telegram_bot_enable', false), // 是否开启 Telegram 机器人
-                'enable_ticket_system' => (bool) admin_setting('app_enable_ticket_system', true), // 是否开启工单系统
+                'enable_ticket_system' => false, // removed in Lite // 是否开启工单系统
                 'ticket_must_wait_reply' => (bool) admin_setting('ticket_must_wait_reply', 0), // 工单是否需要等待管理员回复后才可继续发消息
-                'enable_commission_system' => (bool) admin_setting('app_enable_commission_system', true), // 是否开启佣金系统
+                'enable_commission_system' => false, // removed in Lite // 是否开启佣金系统
                 'enable_traffic_log' => (bool) admin_setting('app_enable_traffic_log', true), // 是否开启流量日志
                 'enable_knowledge_base' => (bool) admin_setting('app_enable_knowledge_base', true), // 是否开启知识库
-                'enable_announcements' => (bool) admin_setting('app_enable_announcements', true), // 是否开启公告系统
-                'enable_auto_renewal' => (bool) admin_setting('app_enable_auto_renewal', false), // 是否开启自动续费
-                'enable_coupon_system' => (bool) admin_setting('app_enable_coupon_system', true), // 是否开启优惠券系统
+                'enable_announcements' => false, // removed in Lite // 是否开启公告系统
+                'enable_auto_renewal' => false, // no self-service commerce in Lite // 是否开启自动续费
+                'enable_coupon_system' => false, // removed in Lite // 是否开启优惠券系统
                 'enable_speed_test' => (bool) admin_setting('app_enable_speed_test', true), // 是否开启测速功能
                 'enable_server_ping' => (bool) admin_setting('app_enable_server_ping', true), // 是否开启服务器延迟检测
             ],
@@ -80,8 +80,8 @@ class AppController extends Controller
             'security_config' => [
                 'tos_url' => admin_setting('tos_url', 'https://example.com/tos'), // 服务条款 URL
                 'privacy_policy_url' => admin_setting('app_privacy_policy_url', 'https://example.com/privacy'), // 隐私政策 URL
-                'is_email_verify' => (int) admin_setting('email_verify', 1), // 是否开启邮箱验证 (0/1)
-                'is_invite_force' => (int) admin_setting('invite_force', 0), // 是否强制邀请码 (0/1)
+                'is_email_verify' => 0, // email verification removed in Lite // 是否开启邮箱验证 (0/1)
+                'is_invite_force' => 1, // Lite registration is always invite-only // 是否强制邀请码 (0/1)
                 'email_whitelist_suffix' => (int) admin_setting('email_whitelist_suffix', 0), // 邮箱白名单后缀 (0/1)
                 'is_captcha' => (int) admin_setting('captcha_enable', 1), // 是否开启验证码 (0/1)
                 'captcha_type' => admin_setting('captcha_type', 'recaptcha'), // 验证码类型 (recaptcha/turnstile)
@@ -99,7 +99,7 @@ class AppController extends Controller
             ],
             'notification_config' => [
                 'enable_push_notifications' => (bool) admin_setting('app_enable_push_notifications', true), // 是否开启推送通知
-                'enable_email_notifications' => (bool) admin_setting('app_enable_email_notifications', true), // 是否开启邮件通知
+                'enable_email_notifications' => false, // email notification subsystem disabled in Lite // 是否开启邮件通知
                 'enable_sms_notifications' => (bool) admin_setting('app_enable_sms_notifications', false), // 是否开启短信通知
                 'notification_schedule' => [
                     'traffic_warning' => (bool) admin_setting('app_notification_traffic_warning', true), // 流量警告通知
