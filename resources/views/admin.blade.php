@@ -729,6 +729,19 @@
                 '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-primary" id="xnb-save-node">保存 Runtime</button></div>' +
                 '<div id="xnb-node-msg" class="xnb-status"></div>' +
               '</section>' +
+              '<section class="xnb-card">' +
+                '<h3>Snell v5 Runtime</h3>' +
+                '<div class="xnb-muted" style="margin-bottom:10px">每个 Xboard 用户自动创建独立 Snell 实例 / PSK / 端口；QUIC Proxy 固定关闭。</div>' +
+                '<div class="xnb-row"><label>节点名称</label><input id="xnb-snell-name" class="xnb-input" placeholder="例如 NoBrand-Snell-JP"></div>' +
+                '<div class="xnb-row"><label>Display Host</label><input id="xnb-snell-host" class="xnb-input" placeholder="客户端连接入口 IP / 域名"></div>' +
+                '<div class="xnb-row"><label>Hybrid 机器</label><select id="xnb-snell-machine" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>权限组</label><select id="xnb-snell-group" class="xnb-select"></select></div>' +
+                '<div class="xnb-row"><label>Ingress Profile</label><input id="xnb-snell-ingress" class="xnb-input" placeholder="留空=NoBrand 默认入口"></div>' +
+                '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-primary" id="xnb-create-snell">创建 Snell v5</button></div>' +
+                '<div id="xnb-snell-msg" class="xnb-status"></div>' +
+                '<div class="xnb-command"><div class="xnb-row"><label>已有 Snell</label><select id="xnb-snell-existing" class="xnb-select"></select></div>' +
+                '<div class="xnb-actions"><button type="button" class="xnb-btn xnb-btn-warn" id="xnb-drop-snell">删除所选逻辑节点</button></div></div>' +
+              '</section>' +
             '</div>' +
           '</div>';
 
@@ -736,6 +749,8 @@
 
         let machines = [];
         let nodes = [];
+        let snellNodes = [];
+        let groups = [];
         let capabilities = null;
 
         const machineSelect = overlay.querySelector('#xnb-machine');
@@ -746,6 +761,10 @@
         const machineMsg = overlay.querySelector('#xnb-machine-msg');
         const nodeMsg = overlay.querySelector('#xnb-node-msg');
         const fields = overlay.querySelector('#xnb-nobrand-fields');
+        const snellMachineSelect = overlay.querySelector('#xnb-snell-machine');
+        const snellGroupSelect = overlay.querySelector('#xnb-snell-group');
+        const snellExistingSelect = overlay.querySelector('#xnb-snell-existing');
+        const snellMsg = overlay.querySelector('#xnb-snell-msg');
 
         const setMsg = (element, message, isError = false) => {
           element.textContent = message || '';
@@ -846,26 +865,36 @@
           setMsg(machineMsg, '');
           setMsg(nodeMsg, '');
           try {
-            const [machineData, nodeData, capData] = await Promise.all([
+            const [machineData, nodeData, capData, groupData] = await Promise.all([
               noBrandAdminApi('server/machine/fetch'),
               noBrandAdminApi('server/manage/getNodes'),
-              noBrandAdminApi('server/machine/nobrandCapabilities')
+              noBrandAdminApi('server/machine/nobrandCapabilities'),
+              noBrandAdminApi('server/group/fetch')
             ]);
             machines = Array.isArray(machineData) ? machineData : (machineData?.data || []);
             const allNodes = Array.isArray(nodeData) ? nodeData : (nodeData?.data || []);
             nodes = allNodes.filter((item) => item.type === 'mieru');
+            snellNodes = allNodes.filter((item) => item.type === 'snell');
+            groups = Array.isArray(groupData) ? groupData : (groupData?.data || []);
             capabilities = capData || {};
 
             setSelectOptions(machineSelect, machines, (item) => item.name + ' (#' + item.id + ')');
             setSelectOptions(nodeMachineSelect, machines, (item) => item.name + ' (#' + item.id + ')', true);
             setSelectOptions(nodeSelect, nodes, (item) => item.name + ' (#' + item.id + ')');
+            setSelectOptions(
+              snellMachineSelect,
+              machines.filter((item) => (item.agent_driver || 'xboard-node') === 'nobrand-hybrid'),
+              (item) => item.name + ' (#' + item.id + ')'
+            );
+            setSelectOptions(snellGroupSelect, groups, (item) => item.name + ' (#' + item.id + ')');
+            setSelectOptions(snellExistingSelect, snellNodes, (item) => item.name + ' (#' + item.id + ')');
 
             const cap = overlay.querySelector('#xnb-cap');
             cap.innerHTML =
-              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 3) + '</span>' +
+              '<span class="xnb-badge">Phase ' + escapeHtml(capabilities.phase ?? 4) + '</span>' +
               '<span class="xnb-badge">NoBrand ' + escapeHtml(capabilities.version || 'v3.2.2') + '</span>' +
-              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.3.0') + '</span>' +
-              '<span class="xnb-muted">当前自动 Runtime：Mieru</span>';
+              '<span class="xnb-badge">Companion ' + escapeHtml(capabilities.companion_version || '0.4.0') + '</span>' +
+              '<span class="xnb-muted">自动 Runtime：Mieru / Snell v5</span>';
 
             renderMachine();
             renderNode();
@@ -967,6 +996,58 @@
             await load();
           } catch (error) {
             setMsg(nodeMsg, error?.message || '保存失败', true);
+          }
+        };
+
+        overlay.querySelector('#xnb-create-snell').onclick = async () => {
+          const name = overlay.querySelector('#xnb-snell-name').value.trim();
+          const host = overlay.querySelector('#xnb-snell-host').value.trim();
+          const machineId = Number(snellMachineSelect.value || 0);
+          const groupId = Number(snellGroupSelect.value || 0);
+          const ingress = overlay.querySelector('#xnb-snell-ingress').value.trim();
+
+          if (!name || !host || !machineId || !groupId) {
+            return setMsg(snellMsg, '请填写节点名、Display Host，并选择 Hybrid 机器和权限组', true);
+          }
+
+          setMsg(snellMsg, '正在创建…');
+          try {
+            const result = await noBrandAdminApi('server/manage/createNoBrandSnell', {
+              method: 'POST',
+              body: JSON.stringify({
+                name,
+                host,
+                machine_id: machineId,
+                group_ids: [groupId],
+                ingress_profile: ingress || null,
+                advertise_host: host,
+                rate: 1
+              })
+            });
+            setMsg(snellMsg, 'Snell v5 逻辑节点已创建 #' + (result.id || ''));
+            overlay.querySelector('#xnb-snell-name').value = '';
+            await load();
+          } catch (error) {
+            setMsg(snellMsg, error?.message || '创建失败', true);
+          }
+        };
+
+        overlay.querySelector('#xnb-drop-snell').onclick = async () => {
+          const id = Number(snellExistingSelect.value || 0);
+          const item = snellNodes.find((node) => Number(node.id) === id);
+          if (!item) return setMsg(snellMsg, '请选择要删除的 Snell 逻辑节点', true);
+          if (!window.confirm('删除 ' + item.name + '？Companion 下一轮会移除该节点名下所有 xbn 专属实例。')) return;
+
+          setMsg(snellMsg, '正在删除…');
+          try {
+            await noBrandAdminApi('server/manage/drop', {
+              method: 'POST',
+              body: JSON.stringify({ id })
+            });
+            setMsg(snellMsg, 'Snell 逻辑节点已删除；Companion 将清理专属实例');
+            await load();
+          } catch (error) {
+            setMsg(snellMsg, error?.message || '删除失败', true);
           }
         };
 
