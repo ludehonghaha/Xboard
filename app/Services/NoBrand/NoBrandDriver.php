@@ -22,7 +22,11 @@ final class NoBrandDriver
     public const RUNTIME_NATIVE = 'native';
     public const RUNTIME_NOBRAND = 'nobrand';
 
-    public const PROTOCOLS = [
+    /**
+     * Capabilities present in the pinned upstream NoBrand release.
+     * Not every item is exposed as an Xboard node type yet.
+     */
+    public const UPSTREAM_PROTOCOLS = [
         'mieru',
         'snell',
         'hysteria2',
@@ -31,6 +35,17 @@ final class NoBrandDriver
         'vless-reality',
         'ssh-tunnel',
         'forward',
+    ];
+
+    /**
+     * Existing Xboard node types that Phase 1 may mark for NoBrand runtime.
+     * Snell / Sudoku / SSH / Forward need dedicated panel modelling later.
+     */
+    public const PANEL_RUNTIME_TYPES = [
+        'mieru',
+        'hysteria',
+        'tuic',
+        'vless',
     ];
 
     /**
@@ -92,10 +107,14 @@ final class NoBrandDriver
             'upstream_license' => self::UPSTREAM_LICENSE,
             'version' => self::PINNED_VERSION,
             'installer_sha256' => self::INSTALLER_SHA256,
-            'protocols' => self::PROTOCOLS,
+            'upstream_protocols' => self::UPSTREAM_PROTOCOLS,
+            'panel_runtime_types' => self::PANEL_RUNTIME_TYPES,
             'actions' => self::ACTIONS,
             'vendored' => false,
             'execution_model' => 'structured-local-agent-actions',
+            'companion_required' => true,
+            'companion_implemented' => false,
+            'phase' => 1,
         ];
     }
 
