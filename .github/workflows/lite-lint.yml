@@ -27,3 +27,23 @@ jobs:
           python3 -m py_compile agents/nobrand/nobrand_agent.py
           bash -n agents/nobrand/install.sh
           python3 agents/nobrand/nobrand_agent.py --version
+
+      - name: Lint Lite admin JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("resources/views/admin.blade.php").read_text(encoding="utf-8")
+          marker = "// Xboard Lite admin cleanup."
+          pos = source.find(marker)
+          if pos < 0:
+              raise SystemExit("Lite admin marker not found")
+          script_start = source.rfind("<script>", 0, pos)
+          script_end = source.find("</script>", pos)
+          if script_start < 0 or script_end < 0:
+              raise SystemExit("Lite admin script block not found")
+          js = source[script_start + len("<script>"):script_end]
+          Path("/tmp/xboard-lite-admin.js").write_text(js, encoding="utf-8")
+          PY
+          node --check /tmp/xboard-lite-admin.js
