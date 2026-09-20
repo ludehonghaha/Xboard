@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ServerMachine;
 use App\Models\ServerMachineLoadHistory;
 use App\Services\ServerService;
+use App\Services\NoBrand\NoBrandDriver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -34,6 +35,42 @@ class MachineController extends Controller
                 'push_interval' => (int) admin_setting('server_push_interval', 60),
                 'pull_interval' => (int) admin_setting('server_pull_interval', 60),
             ],
+        ]);
+    }
+
+    /**
+     * Desired state for the NoBrand companion runtime.
+     *
+     * This endpoint returns declarative node state only. It never accepts
+     * arbitrary shell commands from the panel.
+     */
+    public function nobrandNodes(Request $request): JsonResponse
+    {
+        $machine = $this->authenticateMachine($request);
+
+        if (($machine->agent_driver ?: 'xboard-node') !== NoBrandDriver::DRIVER) {
+            abort(409, 'Machine is not configured for NoBrand Hybrid');
+        }
+
+        $nodes = ServerService::getNoBrandMachineNodes($machine)
+            ->map(function ($node) {
+                return [
+                    'id' => $node->id,
+                    'name' => $node->name,
+                    'type' => $node->type,
+                    'host' => $node->host,
+                    'port' => $node->port,
+                    'server_port' => $node->server_port,
+                    'protocol_settings' => $node->protocol_settings,
+                    'runtime_driver_settings' => $node->runtime_driver_settings,
+                    'updated_at' => $node->updated_at,
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'driver' => NoBrandDriver::capabilities(),
+            'nodes' => $nodes,
         ]);
     }
 
