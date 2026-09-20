@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ServerSave;
 use App\Models\Server;
 use App\Models\ServerGroup;
+use App\Models\ServerMachine;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,29 @@ use Illuminate\Support\Facades\Log;
 
 class ManageController extends Controller
 {
+    private function validateRuntimeDriverBinding(array $params, ?Server $existing = null): ?array
+    {
+        $runtimeDriver = $params['runtime_driver'] ?? $existing?->runtime_driver ?? 'native';
+        $machineId = array_key_exists('machine_id', $params)
+            ? ($params['machine_id'] ?: null)
+            : $existing?->machine_id;
+
+        if ($runtimeDriver !== 'nobrand') {
+            return null;
+        }
+
+        if (!$machineId) {
+            return [422, 'NoBrand Runtime 节点必须绑定 NoBrand Hybrid 机器'];
+        }
+
+        $machine = ServerMachine::find($machineId);
+        if (!$machine || $machine->agent_driver !== 'nobrand-hybrid') {
+            return [422, '所选机器未启用 NoBrand Hybrid Agent'];
+        }
+
+        return null;
+    }
+
     public function getNodes(Request $request)
     {
         $servers = ServerService::getAllServers()->map(function ($item) {
@@ -57,6 +81,9 @@ class ManageController extends Controller
             if (!$server) {
                 return $this->fail([400202, '服务器不存在']);
             }
+            if ($error = $this->validateRuntimeDriverBinding($params, $server)) {
+                return $this->fail($error);
+            }
             try {
                 $server->update($params);
                 return $this->success(true);
@@ -64,6 +91,10 @@ class ManageController extends Controller
                 Log::error($e);
                 return $this->fail([500, '保存失败']);
             }
+        }
+
+        if ($error = $this->validateRuntimeDriverBinding($params)) {
+            return $this->fail($error);
         }
 
         try {
@@ -81,6 +112,7 @@ class ManageController extends Controller
             'id' => 'required|integer',
             'show' => 'nullable|integer',
             'machine_id' => 'nullable|integer',
+            'runtime_driver' => 'nullable|string|in:native,nobrand',
             'enabled' => 'nullable|boolean',
         ]);
 
@@ -95,8 +127,18 @@ class ManageController extends Controller
         if (array_key_exists('machine_id', $params)) {
             $server->machine_id = $params['machine_id'] ?: null;
         }
+        if (array_key_exists('runtime_driver', $params)) {
+            $server->runtime_driver = $params['runtime_driver'];
+        }
         if (array_key_exists('enabled', $params)) {
             $server->enabled = (bool) $params['enabled'];
+        }
+
+        if ($error = $this->validateRuntimeDriverBinding([
+            'machine_id' => $server->machine_id,
+            'runtime_driver' => $server->runtime_driver,
+        ], $server)) {
+            return $this->fail($error);
         }
 
         if (!$server->save()) {
@@ -227,6 +269,7 @@ class ManageController extends Controller
             'show' => 'nullable|integer|in:0,1',
             'enabled' => 'nullable|boolean',
             'machine_id' => 'nullable|integer',
+            'runtime_driver' => 'nullable|string|in:native,nobrand',
         ]);
 
         $ids = $params['ids'];
@@ -244,6 +287,9 @@ class ManageController extends Controller
         if (array_key_exists('machine_id', $params)) {
             $update['machine_id'] = $params['machine_id'] ?: null;
         }
+        if (array_key_exists('runtime_driver', $params)) {
+            $update['runtime_driver'] = $params['runtime_driver'];
+        }
 
         if (empty($update)) {
             return $this->fail([400, '没有可更新的字段']);
@@ -254,6 +300,15 @@ class ManageController extends Controller
             DB::transaction(function () use ($servers, $update) {
                 /** @var Server $server */
                 foreach ($servers as $server) {
+                    $candidate = array_merge([
+                        'machine_id' => $server->machine_id,
+                        'runtime_driver' => $server->runtime_driver ?? 'native',
+                    ], $update);
+
+                    if ($error = $this->validateRuntimeDriverBinding($candidate, $server)) {
+                        throw new \InvalidArgumentException($error[1]);
+                    }
+
                     $server->update($update);
                 }
             });
