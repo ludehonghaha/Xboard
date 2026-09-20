@@ -27,8 +27,8 @@ class ManageController extends Controller
         }
 
         $type = $params['type'] ?? $existing?->type;
-        if ($type !== Server::TYPE_MIERU) {
-            return [422, 'NoBrand Agent Phase 2 当前仅开放 Mieru Runtime'];
+        if (!in_array($type, [Server::TYPE_MIERU, Server::TYPE_SNELL], true)) {
+            return [422, 'NoBrand Agent 当前仅开放 Mieru / Snell Runtime'];
         }
 
         $settings = $params['runtime_driver_settings']
@@ -39,28 +39,6 @@ class ManageController extends Controller
             return [422, 'NoBrand Runtime 设置格式无效'];
         }
 
-        $profile = $settings['profile'] ?? 'iplc';
-        if (!in_array($profile, ['iplc', 'balanced', 'stealth'], true)) {
-            return [422, 'NoBrand Profile 仅支持 iplc / balanced / stealth'];
-        }
-
-        $handshake = $settings['handshake_mode'] ?? 'no-wait';
-        if (!in_array($handshake, ['no-wait', 'standard'], true)) {
-            return [422, 'NoBrand Handshake 仅支持 no-wait / standard'];
-        }
-
-        $multiplexing = $settings['multiplexing'] ?? 'off';
-        if (!in_array($multiplexing, ['off', 'low', 'middle', 'high'], true)) {
-            return [422, 'NoBrand Multiplexing 参数无效'];
-        }
-
-        $mtu = $settings['mtu'] ?? 1400;
-        $mtuValid = in_array($mtu, ['safe', 'auto'], true)
-            || (is_numeric($mtu) && (int) $mtu >= 1280 && (int) $mtu <= 1500);
-        if (!$mtuValid) {
-            return [422, 'NoBrand MTU 仅支持 safe / auto / 1280-1500'];
-        }
-
         foreach (['advertise_host' => 255, 'ingress_profile' => 128] as $field => $maxLength) {
             $value = $settings[$field] ?? null;
             if ($value !== null && (!is_string($value) || mb_strlen($value) > $maxLength)) {
@@ -68,9 +46,48 @@ class ManageController extends Controller
             }
         }
 
-        foreach (['pin_primary_port', 'sync_advertise_host'] as $field) {
-            if (array_key_exists($field, $settings) && !is_bool($settings[$field])) {
-                return [422, "NoBrand {$field} 必须为布尔值"];
+        if ($type === Server::TYPE_MIERU) {
+            $profile = $settings['profile'] ?? 'iplc';
+            if (!in_array($profile, ['iplc', 'balanced', 'stealth'], true)) {
+                return [422, 'NoBrand Profile 仅支持 iplc / balanced / stealth'];
+            }
+
+            $handshake = $settings['handshake_mode'] ?? 'no-wait';
+            if (!in_array($handshake, ['no-wait', 'standard'], true)) {
+                return [422, 'NoBrand Handshake 仅支持 no-wait / standard'];
+            }
+
+            $multiplexing = $settings['multiplexing'] ?? 'off';
+            if (!in_array($multiplexing, ['off', 'low', 'middle', 'high'], true)) {
+                return [422, 'NoBrand Multiplexing 参数无效'];
+            }
+
+            $mtu = $settings['mtu'] ?? 1400;
+            $mtuValid = in_array($mtu, ['safe', 'auto'], true)
+                || (is_numeric($mtu) && (int) $mtu >= 1280 && (int) $mtu <= 1500);
+            if (!$mtuValid) {
+                return [422, 'NoBrand MTU 仅支持 safe / auto / 1280-1500'];
+            }
+
+            foreach (['pin_primary_port', 'sync_advertise_host'] as $field) {
+                if (array_key_exists($field, $settings) && !is_bool($settings[$field])) {
+                    return [422, "NoBrand {$field} 必须为布尔值"];
+                }
+            }
+        }
+
+        if ($type === Server::TYPE_SNELL) {
+            $protocolSettings = $params['protocol_settings']
+                ?? $existing?->protocol_settings
+                ?? [];
+
+            $version = (int) data_get($protocolSettings, 'version', 5);
+            if ($version !== 5) {
+                return [422, 'NoBrand Snell Runtime 当前仅开放 v5'];
+            }
+
+            if ((bool) data_get($protocolSettings, 'quic', false)) {
+                return [422, 'NoBrand Snell v5 QUIC Proxy 暂不开放自动托管'];
             }
         }
 
@@ -83,15 +100,17 @@ class ManageController extends Controller
             return [422, '所选机器未启用 NoBrand Hybrid Agent'];
         }
 
-        $duplicate = Server::query()
-            ->where('machine_id', $machineId)
-            ->where('runtime_driver', 'nobrand')
-            ->where('type', Server::TYPE_MIERU)
-            ->when($existing, fn ($query) => $query->where('id', '!=', $existing->id))
-            ->exists();
+        if ($type === Server::TYPE_MIERU) {
+            $duplicate = Server::query()
+                ->where('machine_id', $machineId)
+                ->where('runtime_driver', 'nobrand')
+                ->where('type', Server::TYPE_MIERU)
+                ->when($existing, fn ($query) => $query->where('id', '!=', $existing->id))
+                ->exists();
 
-        if ($duplicate) {
-            return [422, 'Phase 2 每台机器仅允许一个 NoBrand Mieru 节点'];
+            if ($duplicate) {
+                return [422, '每台机器仅允许一个 NoBrand Mieru 逻辑节点'];
+            }
         }
 
         return null;
