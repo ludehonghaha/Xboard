@@ -115,6 +115,7 @@ class MachineController extends Controller
 
         return response()->json([
             'driver' => NoBrandDriver::capabilities(),
+            'agent_settings' => $machine->agent_settings ?? [],
             'nodes' => $nodes,
         ]);
     }
