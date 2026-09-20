@@ -84,3 +84,37 @@ It shows:
 - Users expiring within 7 days
 
 The upstream compiled admin application remains mounted for compatibility. Legacy zero-value commerce statistic endpoints are temporarily retained so the compiled bundle does not fail while its dashboard is hidden. They can be removed after the admin frontend is fully replaced.
+
+
+## Lite user management
+
+The admin user surface is operational rather than financial.
+
+Kept:
+
+- Account / email / password
+- Service plan
+- Permission group visibility
+- Upload / download / used / remaining traffic
+- Speed limit
+- Device limit
+- Expiration time
+- Account status
+- Admin / staff flags
+- Remarks
+- Subscription URL / secret reset
+- Online state / online device count
+- CSV export without financial data
+
+Removed from the Lite admin API and UI:
+
+- Balance
+- Discount
+- Referral inviter fields
+- Commission type / rate / balance
+- Order and finance actions
+- Bulk email action
+
+Legacy database columns are retained for migration compatibility, but the Lite user-management API neither exposes nor edits them.
+
+User filtering and sorting use a Lite allow-list so removed financial/referral fields cannot be queried through the admin user API.
