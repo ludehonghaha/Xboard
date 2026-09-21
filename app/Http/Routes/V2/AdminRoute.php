@@ -50,6 +50,12 @@ class AdminRoute
                 $router->post('/save', [ManageController::class, 'save']);
                 $router->post('/drop', [ManageController::class, 'drop']);
                 $router->post('/resetTraffic', [ManageController::class, 'resetTraffic']);
+                $router->post('/copy', [ManageController::class, 'copy']);
+                $router->post('/sort', [ManageController::class, 'sort']);
+                $router->post('/batchDelete', [ManageController::class, 'batchDelete']);
+                $router->post('/batchUpdate', [ManageController::class, 'batchUpdate']);
+                $router->post('/batchResetTraffic', [ManageController::class, 'batchResetTraffic']);
+                $router->get('/generateEchKey', [ManageController::class, 'generateEchKey']);
             });
 
             $router->group(['prefix' => 'server/machine'], function ($router) {
@@ -58,6 +64,9 @@ class AdminRoute
                 $router->post('/drop', [MachineController::class, 'drop']);
                 $router->get('/installCommand', [MachineController::class, 'installCommand']);
                 $router->get('/nodes', [MachineController::class, 'nodes']);
+                $router->post('/resetToken', [MachineController::class, 'resetToken']);
+                $router->get('/getToken', [MachineController::class, 'getToken']);
+                $router->get('/history', [MachineController::class, 'history']);
             });
 
             $router->group(['prefix' => 'user'], function ($router) {
@@ -66,6 +75,9 @@ class AdminRoute
                 $router->get('/getUserInfoById', [UserController::class, 'getUserInfoById']);
                 $router->post('/ban', [UserController::class, 'ban']);
                 $router->post('/resetSecret', [UserController::class, 'resetSecret']);
+                $router->post('/generate', [UserController::class, 'generate']);
+                $router->post('/destroy', [UserController::class, 'destroy']);
+                $router->post('/dumpCSV', [UserController::class, 'dumpCSV']);
             });
 
             $router->get('/stat/liteDashboard', [StatController::class, 'liteDashboard']);

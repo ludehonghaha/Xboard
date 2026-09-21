@@ -28,3 +28,5 @@ frontend
 
 bootstrap/cache/*.php
 !bootstrap/cache/.gitignore
+
+.preview-v21-*
