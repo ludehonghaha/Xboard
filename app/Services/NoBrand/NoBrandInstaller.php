@@ -5,10 +5,9 @@ namespace App\Services\NoBrand;
 /**
  * Installer metadata for the external ike-sh/NoBrand-OneClick project.
  *
- * No upstream GPL source is copied into Xboard Lite. A NoBrand machine is an
- * independent machine type: Xboard only creates the machine record and emits
- * a checksum-pinned one-click bootstrap command. Protocol/user lifecycle stays
- * entirely inside NoBrand-OneClick.
+ * A NoBrand machine remains an independent protocol runtime. Xboard installs
+ * only a narrow policy bridge that can synchronize existing Mieru users'
+ * quota, bandwidth, expiry and enabled state.
  */
 final class NoBrandInstaller
 {
@@ -17,6 +16,9 @@ final class NoBrandInstaller
     public const UPSTREAM_LICENSE = 'GPL-3.0';
     public const PINNED_VERSION = 'v3.2.2';
     public const INSTALLER_SHA256 = '37ba6fb4f35c7e032d05021782a090040af09337c5e95a42cbc0f8f0cf7d66c0';
+
+    public const POLICY_AGENT_VERSION = '0.1.0';
+    public const POLICY_INSTALLER_URL = 'https://raw.githubusercontent.com/ludehonghaha/Xboard/xboard-lite-v1/agents/nobrand-policy/install.sh';
 
     public static function installerUrl(): string
     {
@@ -27,12 +29,12 @@ final class NoBrandInstaller
         );
     }
 
-    public static function bootstrapCommand(): string
+    public static function bootstrapCommand(string $panelUrl, int $machineId, string $token): string
     {
         $url = escapeshellarg(self::installerUrl());
         $sha = escapeshellarg(self::INSTALLER_SHA256);
 
-        return implode(' && ', [
+        $manager = implode(' && ', [
             'set -e',
             'tmp="$(mktemp /tmp/xboard-nobrand.XXXXXX.sh)"',
             'curl -fsSL ' . $url . ' -o "$tmp"',
@@ -41,5 +43,15 @@ final class NoBrandInstaller
             'rm -f "$tmp"',
             'sudo nobrand --version',
         ]);
+
+        $policy = sprintf(
+            'curl -fsSL %s | sudo bash -s -- --panel %s --machine-id %d --token %s',
+            escapeshellarg(self::POLICY_INSTALLER_URL),
+            escapeshellarg(rtrim($panelUrl, '/')),
+            $machineId,
+            escapeshellarg($token)
+        );
+
+        return $manager . ' && ' . $policy;
     }
 }
