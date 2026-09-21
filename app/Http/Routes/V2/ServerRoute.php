@@ -30,8 +30,6 @@ class ServerRoute
             'prefix' => 'server/machine',
         ], function ($route) {
             $route->post('nodes', [MachineController::class, 'nodes']);
-            $route->post('nobrand-policies', [MachineController::class, 'nobrandPolicies']);
-            $route->post('nobrand-policy-status', [MachineController::class, 'nobrandPolicyStatus']);
             $route->post('status', [MachineController::class, 'status']);
         });
     }
