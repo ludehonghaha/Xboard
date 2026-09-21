@@ -29,6 +29,8 @@ class MachineController extends Controller
                     'is_active' => $machine->is_active,
                     'agent_driver' => $machine->agent_driver ?: 'xboard-node',
                     'last_seen_at' => $machine->last_seen_at,
+                    'policy_last_seen_at' => $machine->policy_last_seen_at,
+                    'policy_status' => $machine->policy_status,
                     'load_status' => $machine->load_status,
                     'servers_count' => $machine->servers_count,
                     'created_at' => $machine->created_at,
@@ -214,11 +216,15 @@ class MachineController extends Controller
 
     private function buildInstallCommand(Request $request, ServerMachine $machine): string
     {
-        if (($machine->agent_driver ?: 'xboard-node') === NoBrandInstaller::DRIVER) {
-            return NoBrandInstaller::bootstrapCommand();
-        }
-
         $panelUrl = rtrim((string) (admin_setting('app_url') ?: $request->getSchemeAndHttpHost()), '/');
+
+        if (($machine->agent_driver ?: 'xboard-node') === NoBrandInstaller::DRIVER) {
+            return NoBrandInstaller::bootstrapCommand(
+                $panelUrl,
+                (int) $machine->id,
+                (string) $machine->token
+            );
+        }
         $installerUrl = 'https://raw.githubusercontent.com/cedar2025/xboard-node/dev/install.sh';
 
         return sprintf(
