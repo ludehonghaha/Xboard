@@ -149,7 +149,7 @@
         <aside class="sidebar">
           <div class="brand">${esc(cfg.title || 'Xboard Lite')}</div>
           <nav class="nav">${navItems().map(([k,t])=>`<button data-page="${k}">${t}</button>`).join('')}</nav>
-          <div class="foot">Lite v2.1 · ${esc(cfg.version || '')}</div>
+          <div class="foot">Lite v2.2 · ${esc(cfg.version || '')}</div>
         </aside>
         <main class="main">
           <header class="topbar">
@@ -1015,6 +1015,271 @@
     }
     c.querySelectorAll('[data-stab]').forEach(function(x){x.onclick=function(){show(x.dataset.stab);};});
     show('site');
+  }
+
+
+  function machineStatusInfo(m) {
+    if (!m.is_active) return {text:'已停用', cls:'bad'};
+    if (!m.last_seen_at) return {text:'未接入 Agent', cls:'warn'};
+    if (m.is_online) return {text:'在线', cls:'good'};
+    return {text:'离线', cls:'bad'};
+  }
+
+  function machinePct(used, total) {
+    used = Number(used || 0);
+    total = Number(total || 0);
+    if (!total) return 0;
+    return Math.max(0, Math.min(100, Math.round(used * 100 / total)));
+  }
+
+  function machineLastSeen(ts) {
+    if (!ts) return '从未接入';
+    return fmtDate(ts);
+  }
+
+  function machineRate(v) {
+    v = Number(v || 0);
+    if (!v) return '0 B/s';
+    return fmtBytes(v) + '/s';
+  }
+
+  function machineMetric(label, value, sub, pct) {
+    const bar = pct == null ? '' :
+      '<div style="height:6px;background:var(--line,#e5e7eb);border-radius:6px;overflow:hidden;margin-top:6px">' +
+      '<div style="height:100%;width:' + pct + '%;background:currentColor;opacity:.55"></div></div>';
+    return '<div class="card" style="padding:12px;min-width:0">' +
+      '<div class="muted" style="font-size:12px">' + label + '</div>' +
+      '<div style="font-size:18px;font-weight:700;margin-top:4px">' + value + '</div>' +
+      '<div class="muted" style="font-size:12px;margin-top:2px">' + (sub || '') + '</div>' + bar +
+      '</div>';
+  }
+
+  function machineSpark(history, getter) {
+    const values = (history || []).map(getter).map(Number).filter(Number.isFinite);
+    if (values.length < 2) return '<div class="muted">暂无历史数据</div>';
+    const max = Math.max.apply(null, values.concat([1]));
+    const w = 420, h = 86, pad = 4;
+    const points = values.map(function(v, i) {
+      const x = pad + i * (w - pad * 2) / Math.max(1, values.length - 1);
+      const y = h - pad - (v / max) * (h - pad * 2);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%;height:86px;display:block">' +
+      '<polyline points="' + points + '" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"></polyline>' +
+      '</svg>';
+  }
+
+  async function renderMachines(c) {
+    const items = await request(adminUrl('server/machine/fetch'));
+    let rows = '';
+
+    (items || []).forEach(function(m) {
+      const s = machineStatusInfo(m);
+      const load = m.load_status || {};
+      const mem = load.mem || {};
+      const disk = load.disk || {};
+      const net = load.net || {};
+      const memPct = machinePct(mem.used, mem.total);
+      const diskPct = machinePct(disk.used, disk.total);
+      const cpuText = load.cpu == null ? '—' : Number(load.cpu).toFixed(1) + '%';
+      const memText = mem.total ? (memPct + '%') : '—';
+      const diskText = disk.total ? (diskPct + '%') : '—';
+      const netText = load.net ? ('↓ ' + machineRate(net.in_speed) + ' / ↑ ' + machineRate(net.out_speed)) : '—';
+
+      rows += '<tr>' +
+        '<td><b>' + esc(m.name) + '</b><div class="muted" style="font-size:12px">' + esc(m.notes || '') + '</div></td>' +
+        '<td><span class="badge ' + s.cls + '">' + s.text + '</span></td>' +
+        '<td>' + cpuText + '</td>' +
+        '<td>' + memText + '</td>' +
+        '<td>' + diskText + '</td>' +
+        '<td style="white-space:nowrap">' + netText + '</td>' +
+        '<td>' + (m.servers_count || 0) + '</td>' +
+        '<td style="white-space:nowrap">' + machineLastSeen(m.last_seen_at) + '</td>' +
+        '<td><div class="actions">' +
+          '<button class="btn primary small" data-machine-detail="' + m.id + '">详情</button>' +
+          '<button class="btn ghost small" data-machine-sync="' + m.id + '" ' + (!m.is_online ? 'disabled' : '') + '>同步</button>' +
+          '<button class="btn ghost small" data-machine-install="' + m.id + '">Agent</button>' +
+          '<button class="btn ghost small" data-machine-edit="' + m.id + '">编辑</button>' +
+        '</div></td>' +
+      '</tr>';
+    });
+
+    c.innerHTML =
+      '<div class="row"><div><h1 class="page-title" style="margin-bottom:4px">服务器</h1>' +
+      '<div class="muted">机器状态、Agent 心跳、负载、网络、绑定节点与同步管理。</div></div>' +
+      '<button class="btn primary small" id="new-machine">添加服务器</button></div>' +
+      '<div class="table-wrap" style="margin-top:16px"><table><thead><tr>' +
+      '<th>服务器</th><th>状态</th><th>CPU</th><th>内存</th><th>磁盘</th><th>实时网络</th><th>节点</th><th>最后心跳</th><th></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+
+    function openMachineEditor(m) {
+      m = m || {};
+      modal(m.id ? '编辑服务器' : '添加服务器',
+        '<form id="machine-form">' +
+          '<div class="field"><label>名称</label><input name="name" value="' + esc(m.name || '') + '" required></div>' +
+          '<div class="field"><label>备注</label><textarea name="notes" rows="3">' + esc(m.notes || '') + '</textarea></div>' +
+          '<div class="field"><label><input type="checkbox" name="is_active" ' + ((m.id ? m.is_active : true) ? 'checked' : '') + '> 启用服务器</label></div>' +
+          '<button class="btn primary">保存</button><div id="machine-msg"></div>' +
+        '</form>',
+        function(box, close) {
+          box.querySelector('#machine-form').onsubmit = async function(e) {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            try {
+              const data = await request(adminUrl('server/machine/save'), {
+                method:'POST',
+                body:{
+                  id:m.id || null,
+                  name:fd.get('name'),
+                  notes:fd.get('notes') || null,
+                  is_active:fd.get('is_active') === 'on'
+                }
+              });
+              toast('服务器已保存');
+              close();
+              if (!m.id && data && data.install_command) {
+                modal('安装 Agent', '<div class="muted" style="margin-bottom:10px">在目标服务器以 root/sudo 执行：</div><div class="codebox">' + esc(data.install_command) + '</div>');
+              }
+              renderMachines(c);
+            } catch (err) {
+              const msg = box.querySelector('#machine-msg');
+              msg.className = 'error';
+              msg.textContent = err.message;
+            }
+          };
+        }
+      );
+    }
+
+    async function showInstall(m) {
+      try {
+        const d = await request(adminUrl('server/machine/installCommand?id=' + encodeURIComponent(m.id)));
+        modal('安装 / 重装 Agent · ' + esc(m.name),
+          '<div class="muted" style="margin-bottom:10px">在目标 VPS 上执行。安装成功后通常会在几分钟内出现心跳和负载。</div>' +
+          '<div class="codebox" id="agent-command">' + esc(d.command || '') + '</div>' +
+          '<div class="actions" style="margin-top:12px"><button class="btn primary" id="copy-agent-command">复制命令</button></div>',
+          function(box) {
+            box.querySelector('#copy-agent-command').onclick = async function() {
+              await navigator.clipboard.writeText(d.command || '');
+              toast('安装命令已复制');
+            };
+          }
+        );
+      } catch (err) { toast(err.message, false); }
+    }
+
+    async function syncMachine(m) {
+      try {
+        await request(adminUrl('server/machine/sync'), {method:'POST', body:{id:m.id}});
+        toast('已向 ' + m.name + ' 推送节点与配置同步');
+      } catch (err) { toast(err.message, false); }
+    }
+
+    async function showMachineDetail(m) {
+      let nodes = [], history = [];
+      try {
+        const data = await Promise.all([
+          request(adminUrl('server/machine/nodes?machine_id=' + encodeURIComponent(m.id))),
+          request(adminUrl('server/machine/history?machine_id=' + encodeURIComponent(m.id) + '&range_hours=24&limit=240'))
+        ]);
+        nodes = data[0] || [];
+        history = data[1] || [];
+      } catch (err) {
+        toast(err.message, false);
+      }
+
+      const s = machineStatusInfo(m);
+      const load = m.load_status || {};
+      const mem = load.mem || {};
+      const disk = load.disk || {};
+      const net = load.net || {};
+      const memPct = machinePct(mem.used, mem.total);
+      const diskPct = machinePct(disk.used, disk.total);
+
+      let nodeRows = '';
+      nodes.forEach(function(n) {
+        nodeRows += '<tr><td>' + esc(n.name) + '</td><td><span class="badge">' + esc(n.type) + '</span></td><td class="mono">' + esc(n.host) + ':' + esc(n.port) + '</td><td>' + (n.enabled ? '启用' : '停用') + '</td><td>' + (Number(n.show) ? '展示' : '隐藏') + '</td></tr>';
+      });
+      if (!nodeRows) nodeRows = '<tr><td colspan="5" class="muted">此服务器暂未绑定节点</td></tr>';
+
+      const noAgent = !m.last_seen_at ?
+        '<div class="card" style="border-style:dashed;margin-bottom:14px"><b>Agent 尚未接入</b><div class="muted" style="margin-top:6px">当前只有服务器记录，没有心跳或负载数据。点击“安装 / 重装 Agent”并在目标 VPS 执行安装命令。</div></div>' : '';
+
+      const html =
+        '<div class="row" style="margin-bottom:14px"><div><h2 style="margin:0">' + esc(m.name) + '</h2><div class="muted">' + esc(m.notes || '无备注') + '</div></div><span class="badge ' + s.cls + '">' + s.text + '</span></div>' +
+        noAgent +
+        '<div class="grid cols2" style="grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">' +
+          machineMetric('CPU', load.cpu == null ? '—' : Number(load.cpu).toFixed(1) + '%', '当前负载', load.cpu == null ? null : Number(load.cpu)) +
+          machineMetric('内存', mem.total ? memPct + '%' : '—', mem.total ? (fmtBytes(mem.used) + ' / ' + fmtBytes(mem.total)) : '暂无数据', mem.total ? memPct : null) +
+          machineMetric('磁盘', disk.total ? diskPct + '%' : '—', disk.total ? (fmtBytes(disk.used) + ' / ' + fmtBytes(disk.total)) : '暂无数据', disk.total ? diskPct : null) +
+          machineMetric('实时网络', load.net ? ('↓ ' + machineRate(net.in_speed)) : '—', load.net ? ('↑ ' + machineRate(net.out_speed)) : '暂无数据', null) +
+        '</div>' +
+        '<div class="card" style="margin-top:12px"><div class="row"><b>连接状态</b><span class="muted">最后心跳：' + machineLastSeen(m.last_seen_at) + '</span></div>' +
+          '<div class="muted" style="margin-top:8px">服务器 ID：' + m.id + ' · 已绑定节点：' + (m.servers_count || 0) + '</div></div>' +
+        '<div class="grid cols2" style="margin-top:12px;gap:12px">' +
+          '<div class="card"><div class="row"><b>CPU · 24h</b><span class="muted">' + history.length + ' 点</span></div>' + machineSpark(history, function(x){return x.cpu || 0;}) + '</div>' +
+          '<div class="card"><div class="row"><b>内存 · 24h</b><span class="muted">使用率</span></div>' + machineSpark(history, function(x){return machinePct(x.mem_used,x.mem_total);}) + '</div>' +
+        '</div>' +
+        '<div class="card" style="margin-top:12px"><div class="row"><b>绑定节点</b><span class="muted">' + nodes.length + ' 个</span></div>' +
+          '<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>名称</th><th>协议</th><th>地址</th><th>启用</th><th>展示</th></tr></thead><tbody>' + nodeRows + '</tbody></table></div></div>' +
+        '<div class="actions" style="margin-top:14px;flex-wrap:wrap">' +
+          '<button class="btn primary" id="machine-detail-sync" ' + (!m.is_online ? 'disabled' : '') + '>立即同步</button>' +
+          '<button class="btn ghost" id="machine-detail-agent">安装 / 重装 Agent</button>' +
+          '<button class="btn ghost" id="machine-detail-token">查看 Token</button>' +
+          '<button class="btn ghost" id="machine-detail-edit">编辑服务器</button>' +
+          '<button class="btn danger" id="machine-detail-drop">删除服务器</button>' +
+        '</div>';
+
+      modal('服务器详情', html, function(box, close) {
+        box.classList.add('wide');
+        box.querySelector('#machine-detail-sync').onclick = function(){syncMachine(m);};
+        box.querySelector('#machine-detail-agent').onclick = function(){showInstall(m);};
+        box.querySelector('#machine-detail-edit').onclick = function(){close();openMachineEditor(m);};
+        box.querySelector('#machine-detail-token').onclick = async function() {
+          try {
+            const d = await request(adminUrl('server/machine/getToken?id=' + encodeURIComponent(m.id)));
+            modal('Agent Token · ' + esc(m.name),
+              '<div class="codebox" id="machine-token">' + esc(d.token || '') + '</div>' +
+              '<div class="actions" style="margin-top:12px"><button class="btn ghost" id="copy-machine-token">复制</button><button class="btn danger" id="reset-machine-token">重置 Token</button></div>',
+              function(tb) {
+                tb.querySelector('#copy-machine-token').onclick = async function(){await navigator.clipboard.writeText(d.token || '');toast('Token 已复制');};
+                tb.querySelector('#reset-machine-token').onclick = async function(){
+                  if(!confirm('重置后旧 Agent Token 会立即失效，需要重新配置/安装 Agent。继续？')) return;
+                  try {
+                    const x = await request(adminUrl('server/machine/resetToken'), {method:'POST',body:{id:m.id}});
+                    tb.querySelector('#machine-token').textContent = x.token || '';
+                    toast('Token 已重置');
+                  } catch(err){toast(err.message,false);}
+                };
+              }
+            );
+          } catch (err) { toast(err.message, false); }
+        };
+        box.querySelector('#machine-detail-drop').onclick = async function() {
+          if(!confirm('删除服务器 ' + m.name + '？关联节点会解除绑定。')) return;
+          try {
+            await request(adminUrl('server/machine/drop'), {method:'POST',body:{id:m.id}});
+            toast('服务器已删除');
+            close();
+            renderMachines(c);
+          } catch(err){toast(err.message,false);}
+        };
+      });
+    }
+
+    c.querySelector('#new-machine').onclick = function(){openMachineEditor({});};
+    c.querySelectorAll('[data-machine-detail]').forEach(function(b){
+      b.onclick = function(){showMachineDetail(items.find(function(m){return Number(m.id)===Number(b.dataset.machineDetail);}));};
+    });
+    c.querySelectorAll('[data-machine-sync]').forEach(function(b){
+      b.onclick = function(){syncMachine(items.find(function(m){return Number(m.id)===Number(b.dataset.machineSync);}));};
+    });
+    c.querySelectorAll('[data-machine-install]').forEach(function(b){
+      b.onclick = function(){showInstall(items.find(function(m){return Number(m.id)===Number(b.dataset.machineInstall);}));};
+    });
+    c.querySelectorAll('[data-machine-edit]').forEach(function(b){
+      b.onclick = function(){openMachineEditor(items.find(function(m){return Number(m.id)===Number(b.dataset.machineEdit);}));};
+    });
   }
 
   bootstrap();

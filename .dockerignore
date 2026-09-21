@@ -30,3 +30,5 @@ bootstrap/cache/*.php
 !bootstrap/cache/.gitignore
 
 .preview-v21-*
+
+.preview-v22-*

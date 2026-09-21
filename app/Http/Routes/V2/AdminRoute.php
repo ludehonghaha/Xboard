@@ -67,6 +67,7 @@ class AdminRoute
                 $router->post('/resetToken', [MachineController::class, 'resetToken']);
                 $router->get('/getToken', [MachineController::class, 'getToken']);
                 $router->get('/history', [MachineController::class, 'history']);
+                $router->post('/sync', [MachineController::class, 'sync']);
             });
 
             $router->group(['prefix' => 'user'], function ($router) {

@@ -21,11 +21,15 @@ class MachineController extends Controller
             ->orderBy('id')
             ->get()
             ->map(function (ServerMachine $machine) {
+                $onlineCutoff = now()->timestamp - 300;
+
                 return [
                     'id' => $machine->id,
                     'name' => $machine->name,
                     'notes' => $machine->notes,
                     'is_active' => $machine->is_active,
+                    'is_online' => (bool) $machine->is_active
+                        && (int) $machine->last_seen_at >= $onlineCutoff,
                     'last_seen_at' => $machine->last_seen_at,
                     'load_status' => $machine->load_status,
                     'servers_count' => $machine->servers_count,
@@ -158,6 +162,29 @@ class MachineController extends Controller
             ->get(['id', 'name', 'type', 'host', 'port', 'show', 'enabled', 'sort']);
 
         return $this->success($nodes);
+    }
+
+    /**
+     * Push the current node set and full configs to a connected machine.
+     */
+    public function sync(Request $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|exists:v2_server_machine,id',
+        ]);
+
+        $machine = ServerMachine::findOrFail($params['id']);
+
+        NodeSyncService::notifyMachineNodesChanged($machine->id);
+
+        foreach ($machine->servers()->where('enabled', true)->get() as $node) {
+            NodeSyncService::notifyFullSync($node->id);
+        }
+
+        return $this->success([
+            'machine_id' => $machine->id,
+            'nodes_count' => $machine->servers()->count(),
+        ]);
     }
 
     /**
