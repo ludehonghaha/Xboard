@@ -519,7 +519,7 @@
             '<div style="margin-top:10px"><input id="xnbm-notes" class="xnbm-input" placeholder="备注（可选）"></div>' +
             '<div class="xnbm-row" style="margin-top:12px"><button type="button" class="xnbm-action xnbm-primary" id="xnbm-create">创建并生成一键命令</button><button type="button" class="xnbm-action" id="xnbm-refresh">刷新</button></div>' +
             '<div id="xnbm-message" class="xnbm-muted" style="min-height:20px;margin-top:10px"></div>' +
-            '<div id="xnbm-command-box" style="display:none;margin-top:12px"><div class="xnbm-muted">复制到目标服务器以安装 NoBrand Manager：</div><textarea id="xnbm-command" class="xnbm-code" readonly></textarea><div class="xnbm-row"><button type="button" class="xnbm-action" id="xnbm-copy">复制命令</button></div></div>' +
+            '<div id="xnbm-command-box" style="display:none;margin-top:12px"><div class="xnbm-muted">复制到目标服务器：安装 NoBrand Manager + Xboard Mieru Policy Agent：</div><textarea id="xnbm-command" class="xnbm-code" readonly></textarea><div class="xnbm-row"><button type="button" class="xnbm-action" id="xnbm-copy">复制命令</button></div></div>' +
             '<table class="xnbm-table"><thead><tr><th>机器</th><th>Policy Agent</th><th>备注</th><th>操作</th></tr></thead><tbody id="xnbm-body"></tbody></table>' +
             '<div style="border-top:1px solid #273244;margin-top:22px;padding-top:18px"><h3 style="margin:0 0 6px">Mieru 用户策略映射</h3><div class="xnbm-muted">NoBrand 用户必须已经存在；这里不会创建/删除协议用户。</div>' +
               '<div class="xnbm-row" style="margin-top:12px"><select id="xnbm-policy-machine" class="xnbm-select" style="flex:1;min-width:180px"></select><input id="xnbm-policy-email" class="xnbm-input" style="flex:1;min-width:220px" placeholder="Xboard 用户邮箱"></div>' +
@@ -754,7 +754,7 @@
             showCommand(result.install_command || '');
             overlay.querySelector('#xnbm-name').value = '';
             overlay.querySelector('#xnbm-notes').value = '';
-            setMessage('NoBrand 独立机器已创建。目标机执行下方命令即可。');
+            setMessage('NoBrand 独立机器已创建。目标机执行下方命令后，协议仍由 ike 管，Xboard 仅同步 Mieru 用户策略。');
             await loadMachines();
           } catch (e) {
             setMessage(e.message, true);
