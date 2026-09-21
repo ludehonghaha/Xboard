@@ -45,3 +45,17 @@ jobs:
           Path("/tmp/xboard-lite-admin.js").write_text(js, encoding="utf-8")
           PY
           node --check /tmp/xboard-lite-admin.js
+
+      - name: Validate NoBrand policy agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile agents/nobrand-policy/policy_agent.py
+          bash -n agents/nobrand-policy/install.sh
+          python3 agents/nobrand-policy/policy_agent.py --version
+
+      - name: Smoke NoBrand policy agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/Smoke/NoBrandPolicyAgentSmoke.py
