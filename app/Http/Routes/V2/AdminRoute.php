@@ -12,7 +12,6 @@ use App\Http\Controllers\V2\Admin\UserController;
 use App\Http\Controllers\V2\Admin\StatController;
 use App\Http\Controllers\V2\Admin\GiftCardController;
 use App\Http\Controllers\V2\Admin\KnowledgeController;
-use App\Http\Controllers\V2\Admin\NoBrandPolicyController;
 use App\Http\Controllers\V2\Admin\SystemController;
 use App\Http\Controllers\V2\Admin\ThemeController;
 use App\Http\Controllers\V2\Admin\TrafficResetController;
@@ -91,15 +90,6 @@ class AdminRoute
                 $router->get('/installCommand', [MachineController::class, 'installCommand']);
                 $router->get('/nodes', [MachineController::class, 'nodes']);
                 $router->get('/history', [MachineController::class, 'history']);
-            });
-
-            // NoBrand Mieru policy mapping only (no protocol lifecycle)
-            $router->group([
-                'prefix' => 'nobrand-policy'
-            ], function ($router) {
-                $router->get('/fetch', [NoBrandPolicyController::class, 'fetch']);
-                $router->post('/save', [NoBrandPolicyController::class, 'save']);
-                $router->post('/drop', [NoBrandPolicyController::class, 'drop']);
             });
 
             // User
