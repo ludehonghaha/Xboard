@@ -122,21 +122,66 @@ User filtering and sorting use a Lite allow-list so removed financial/referral f
 
 ## Standalone NoBrand machines
 
-NoBrand-OneClick is integrated only as an **independent machine type**.
+NoBrand-OneClick remains an **independent machine type**. Xboard does not own or deploy its protocols.
 
-The two machine types are intentionally separate:
+The two machine types stay separate:
 
 - `xboard-node`: normal Xboard machine mode; Xboard nodes may be bound to it.
-- `nobrand-oneclick`: standalone ike NoBrand machine; Xboard protocol nodes cannot be bound to it.
+- `nobrand-oneclick`: standalone ike NoBrand machine; normal Xboard protocol nodes cannot be bound to it.
 
-Creating a NoBrand machine in the Lite admin produces a checksum-pinned one-click bootstrap command for:
+Creating a NoBrand machine produces a checksum-pinned one-click bootstrap for:
 
 - upstream: `ike-sh/NoBrand-OneClick`
 - release: `v3.2.2`
 - installer SHA-256: `37ba6fb4f35c7e032d05021782a090040af09337c5e95a42cbc0f8f0cf7d66c0`
 
-The command installs the NoBrand manager only. It does **not** install Xboard-Node, a companion agent, per-user bindings, traffic accounting, or Xboard-managed NoBrand protocol runtimes.
+The bootstrap installs:
 
-After bootstrap, protocol lifecycle remains entirely inside the upstream `nobrand` CLI. Xboard only keeps the independent machine record and can regenerate the installation command.
+1. the upstream NoBrand manager;
+2. the narrow Xboard NoBrand Mieru Policy Agent.
 
-The Lite backend rejects any attempt to bind a normal Xboard protocol node to a `nobrand-oneclick` machine.
+It does **not** install Xboard-Node and it does not install, reconfigure, upgrade or remove any NoBrand protocol.
+
+### Mieru policy bridge
+
+Xboard may explicitly map an Xboard account to an **already-existing** NoBrand Mieru username on a NoBrand machine.
+
+The policy bridge synchronizes only:
+
+- traffic quota: Xboard user `transfer_enable` -> NoBrand `quota_mb`;
+- quota mode/window: mapping setting -> NoBrand `quota_mode/quota_days`;
+- speed limit: Xboard user `speed_limit` -> NoBrand `bandwidth_mbps`;
+- expiry: Xboard user `expired_at` -> NoBrand `expire_at`;
+- account eligibility: banned / no plan / expired -> NoBrand user disabled.
+
+The agent allow-list contains only:
+
+```text
+nobrand mieru user-export
+nobrand mieru user-set-quota
+nobrand mieru user-set-rate
+nobrand mieru user-set-expire
+nobrand mieru user-enable
+nobrand mieru user-disable
+```
+
+It cannot run:
+
+```text
+install
+reconfigure
+upgrade
+uninstall
+user-add
+user-del
+arbitrary shell
+```
+
+If a mapped NoBrand username does not exist, the mapping reports an error and the agent does not create it.
+
+The initial policy bridge supports **Mieru only**, because ike v3.2.2 exposes native per-user quota + bandwidth + expiry controls for Mieru. Snell/Hysteria2/TUIC/VLESS do not currently expose the same complete three-part policy contract.
+
+The bridge currently controls NoBrand enforcement but does not import NoBrand usage into Xboard's `u/d` counters. NoBrand remains the enforcement source for the mapped Mieru quota.
+
+The Lite backend still rejects binding a normal Xboard protocol node to a `nobrand-oneclick` machine.
+
