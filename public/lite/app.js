@@ -149,7 +149,7 @@
         <aside class="sidebar">
           <div class="brand">${esc(cfg.title || 'Xboard Lite')}</div>
           <nav class="nav">${navItems().map(([k,t])=>`<button data-page="${k}">${t}</button>`).join('')}</nav>
-          <div class="foot">Lite v2.2 · ${esc(cfg.version || '')}</div>
+          <div class="foot">Lite v2.3 · ${esc(cfg.version || '')}</div>
         </aside>
         <main class="main">
           <header class="topbar">
@@ -670,8 +670,8 @@
     });
 
     c.innerHTML =
-      '<div class="row"><h1 class="page-title">节点</h1><button class="btn primary small" id="new-node">添加节点</button></div>' +
-      '<div class="muted" style="margin-bottom:12px">支持 Mieru / Hysteria2 / VLESS / Trojan / VMess / Shadowsocks / TUIC / AnyTLS 等。常用字段直接编辑，复杂协议参数保留在高级 JSON。</div>' +
+      '<div class="row"><h1 class="page-title">节点</h1><div class="actions"><button class="btn primary small" id="quick-deploy-node">一键部署协议</button><button class="btn ghost small" id="new-node">手工添加</button></div></div>' +
+      '<div class="muted" style="margin-bottom:12px">一键部署会自动生成端口与协议默认参数，并下发给绑定的 Machine Agent；Reality / ECH 等高级配置仍可手工编辑。</div>' +
       '<div class="table-wrap"><table><thead><tr><th>名称</th><th>协议</th><th>地址</th><th>服务器</th><th>权限组</th><th>启用</th><th>展示</th><th></th></tr></thead><tbody>' +
       rows + '</tbody></table></div>';
 
@@ -786,6 +786,147 @@
       });
     }
 
+    function openQuickDeploy() {
+      const usableMachines = machines.filter(function(m) { return m.is_active; });
+      if (!usableMachines.length) {
+        toast('请先添加并启用一台服务器', false);
+        return;
+      }
+
+      let machineOptions = '';
+      usableMachines.forEach(function(m) {
+        const status = m.is_online ? '在线' : (m.last_seen_at ? '离线' : '未接入');
+        machineOptions += '<option value="' + m.id + '">' + esc(m.name) + ' · ' + status + '</option>';
+      });
+
+      const protocolOptions = [
+        ['mieru','Mieru · TCP'],
+        ['shadowsocks','Shadowsocks · 2022'],
+        ['hysteria','Hysteria2 · 自签 TLS'],
+        ['vless','VLESS · TCP'],
+        ['vmess','VMess · TCP'],
+        ['trojan','Trojan · 自签 TLS'],
+        ['tuic','TUIC · 自签 TLS'],
+        ['anytls','AnyTLS · 自签 TLS']
+      ].map(function(x) {
+        return '<option value="' + x[0] + '">' + x[1] + '</option>';
+      }).join('');
+
+      let groupChecks = '';
+      groups.forEach(function(g) {
+        groupChecks += '<label class="badge"><input type="checkbox" name="quick_group_ids" value="' + g.id + '"> ' + esc(g.name) + '</label>';
+      });
+      if (!groupChecks) groupChecks = '<span class="muted">暂无权限组，将不限制权限组</span>';
+
+      let routeChecks = '';
+      routes.forEach(function(r) {
+        routeChecks += '<label class="badge"><input type="checkbox" name="quick_route_ids" value="' + r.id + '"> ' + esc(r.remarks) + '</label>';
+      });
+      if (!routeChecks) routeChecks = '<span class="muted">暂无路由</span>';
+
+      const html =
+        '<form id="quick-deploy-form">' +
+          '<div class="card" style="margin-bottom:12px">' +
+            '<b>一键部署流程</b><div class="muted" style="margin-top:6px">保存后自动创建节点，并通知 Machine Agent 立即发现和启动服务。</div>' +
+          '</div>' +
+          '<div class="split">' +
+            '<div class="field"><label>服务器</label><select name="machine_id">' + machineOptions + '</select></div>' +
+            '<div class="field"><label>协议模板</label><select name="protocol">' + protocolOptions + '</select></div>' +
+          '</div>' +
+          '<div class="split">' +
+            '<div class="field"><label>节点名称</label><input name="name" placeholder="例如 SG-Mieru" required></div>' +
+            '<div class="field"><label>对外连接地址</label><input name="host" placeholder="服务器公网 IP 或域名" required></div>' +
+          '</div>' +
+          '<div class="split">' +
+            '<div class="field"><label>端口</label><input name="port" type="number" min="1" max="65535" placeholder="留空自动分配 20000-59999"></div>' +
+            '<div class="field" id="quick-tls-wrap" style="display:none"><label>TLS SNI / 证书名称</label><input name="tls_domain" value="node.local"><span class="muted">HY2/TUIC/Trojan/AnyTLS 使用自签证书，客户端会自动允许不安全证书。</span></div>' +
+          '</div>' +
+          '<div class="field"><label>权限组</label><div class="actions">' + groupChecks + '</div></div>' +
+          '<div class="field"><label>路由</label><div class="actions">' + routeChecks + '</div></div>' +
+          '<div class="field"><label><input type="checkbox" name="show" checked> 立即对用户展示</label></div>' +
+          '<div class="card" id="quick-summary" style="margin:12px 0"></div>' +
+          '<div class="actions"><button class="btn primary">立即部署</button><button type="button" class="btn ghost" id="quick-cancel">取消</button></div>' +
+          '<div id="quick-msg"></div>' +
+        '</form>';
+
+      modal('一键部署协议', html, function(box, close) {
+        box.classList.add('wide');
+        const form = box.querySelector('#quick-deploy-form');
+        const proto = form.querySelector('[name=protocol]');
+        const machine = form.querySelector('[name=machine_id]');
+        const name = form.querySelector('[name=name]');
+        const tlsWrap = box.querySelector('#quick-tls-wrap');
+        const summary = box.querySelector('#quick-summary');
+
+        function updateQuickUi() {
+          const p = proto.value;
+          const m = usableMachines.find(function(x){return Number(x.id)===Number(machine.value);});
+          const tlsNeeded = ['hysteria','trojan','tuic','anytls'].includes(p);
+          tlsWrap.style.display = tlsNeeded ? '' : 'none';
+          if (!name.value.trim()) {
+            const label = p === 'hysteria' ? 'HY2' : p.toUpperCase();
+            name.placeholder = (m ? m.name : 'Node') + '-' + label;
+          }
+          const status = m ? (m.is_online ? '在线，可立即下发' : (m.last_seen_at ? '离线，创建后待 Agent 上线自动同步' : 'Agent 未接入，先完成 Agent 安装')) : '';
+          summary.innerHTML =
+            '<div><b>模板：</b>' + esc(proto.options[proto.selectedIndex].text) + '</div>' +
+            '<div style="margin-top:6px"><b>服务器：</b>' + esc(m ? m.name : '') + ' · ' + esc(status) + '</div>' +
+            '<div class="muted" style="margin-top:6px">端口留空会由面板自动分配；创建后仍可进入“编辑”调整高级协议参数。</div>';
+        }
+
+        proto.onchange = updateQuickUi;
+        machine.onchange = updateQuickUi;
+        updateQuickUi();
+        box.querySelector('#quick-cancel').onclick = close;
+
+        form.onsubmit = async function(e) {
+          e.preventDefault();
+          const fd = new FormData(form);
+          const msg = box.querySelector('#quick-msg');
+          const selectedMachine = usableMachines.find(function(x){return Number(x.id)===Number(fd.get('machine_id'));});
+          let nodeName = String(fd.get('name') || '').trim();
+          if (!nodeName) {
+            const p = String(fd.get('protocol'));
+            nodeName = (selectedMachine ? selectedMachine.name : 'Node') + '-' + (p === 'hysteria' ? 'HY2' : p.toUpperCase());
+          }
+          const groupIds = Array.from(form.querySelectorAll('[name=quick_group_ids]:checked')).map(function(x){return Number(x.value);});
+          const routeIds = Array.from(form.querySelectorAll('[name=quick_route_ids]:checked')).map(function(x){return Number(x.value);});
+          const body = {
+            machine_id: Number(fd.get('machine_id')),
+            protocol: fd.get('protocol'),
+            name: nodeName,
+            host: String(fd.get('host') || '').trim(),
+            port: fd.get('port') ? Number(fd.get('port')) : null,
+            tls_domain: fd.get('tls_domain') || null,
+            show: fd.get('show') === 'on',
+            group_ids: groupIds,
+            route_ids: routeIds
+          };
+
+          msg.className = 'muted';
+          msg.textContent = '正在创建节点并下发到 Agent…';
+          try {
+            const data = await request(adminUrl('server/manage/quickDeploy'), {method:'POST', body:body});
+            const online = selectedMachine && selectedMachine.is_online;
+            close();
+            modal('部署已创建',
+              '<div class="card"><div><b>' + esc(data.name || nodeName) + '</b></div>' +
+              '<div class="muted" style="margin-top:8px">协议：' + esc(data.type || body.protocol) + '</div>' +
+              '<div class="muted">地址：' + esc(data.host || body.host) + ':' + esc(data.port || '') + '</div>' +
+              '<div class="muted">服务器：' + esc(selectedMachine ? selectedMachine.name : '') + '</div></div>' +
+              '<div class="' + (online ? 'success' : 'muted') + '" style="margin-top:12px">' +
+                (online ? 'Machine Agent 在线：已发送节点发现通知，服务将自动启动。' : '节点已创建；Agent 上线后会自动发现并启动。') +
+              '</div>');
+            toast('一键部署节点已创建');
+            renderNodes(c);
+          } catch (err) {
+            msg.className = 'error';
+            msg.textContent = err.message;
+          }
+        };
+      });
+    }
+
     async function patchNode(id, patch) {
       try {
         await request(adminUrl('server/manage/update'), {method:'POST', body:Object.assign({id:Number(id)}, patch)});
@@ -796,6 +937,7 @@
       }
     }
 
+    c.querySelector('#quick-deploy-node').onclick = openQuickDeploy;
     c.querySelector('#new-node').onclick = function() { openNode({}); };
     c.querySelectorAll('[data-edit-node]').forEach(function(b) {
       b.onclick = function() {

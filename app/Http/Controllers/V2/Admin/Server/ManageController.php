@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ServerSave;
 use App\Models\Server;
 use App\Models\ServerGroup;
+use App\Models\ServerMachine;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -47,6 +48,186 @@ class ManageController extends Controller
 
         }
         return $this->success(true);
+    }
+
+    /**
+     * Create a machine-bound node from a minimal one-click template.
+     * The Server observer notifies machine mode immediately after creation.
+     */
+    public function quickDeploy(Request $request)
+    {
+        $params = $request->validate([
+            'machine_id' => 'required|integer|exists:v2_server_machine,id',
+            'protocol' => 'required|string|in:mieru,shadowsocks,vless,vmess,trojan,hysteria,tuic,anytls',
+            'name' => 'required|string|max:100',
+            'host' => 'required|string|max:255',
+            'port' => 'nullable|integer|min:1|max:65535',
+            'tls_domain' => 'nullable|string|max:253',
+            'show' => 'nullable|boolean',
+            'group_ids' => 'nullable|array',
+            'group_ids.*' => 'integer',
+            'route_ids' => 'nullable|array',
+            'route_ids.*' => 'integer',
+        ]);
+
+        $machine = ServerMachine::findOrFail($params['machine_id']);
+        if (!$machine->is_active) {
+            return $this->fail([400, '服务器已停用，不能部署节点']);
+        }
+
+        $type = $params['protocol'];
+        $port = (int) ($params['port'] ?? 0);
+        if ($port === 0) {
+            $port = $this->allocateQuickPort();
+        } elseif (Server::query()->where('server_port', $port)->orWhere('port', (string) $port)->exists()) {
+            return $this->fail([400, '该端口已被面板中的其他节点使用']);
+        }
+
+        $tlsDomain = trim((string) ($params['tls_domain'] ?? ''));
+        $needsTls = in_array($type, ['trojan', 'hysteria', 'tuic', 'anytls'], true);
+        if ($needsTls && $tlsDomain === '') {
+            return $this->fail([400, '该协议需要 TLS 域名/SNI；可填写任意用于自签证书的域名']);
+        }
+
+        $protocolSettings = match ($type) {
+            'mieru' => [
+                'transport' => 'TCP',
+                'traffic_pattern' => '',
+                'multiplex' => ['enabled' => false],
+            ],
+            'shadowsocks' => [
+                'cipher' => '2022-blake3-aes-128-gcm',
+                'obfs' => null,
+                'obfs_settings' => null,
+                'plugin' => null,
+                'plugin_opts' => null,
+            ],
+            'vless' => [
+                'tls' => 0,
+                'network' => 'tcp',
+                'network_settings' => [],
+                'flow' => null,
+                'encryption' => ['enabled' => false, 'encryption' => null, 'decryption' => null],
+                'multiplex' => ['enabled' => false],
+                'utls' => ['enabled' => false, 'fingerprint' => 'chrome'],
+            ],
+            'vmess' => [
+                'tls' => 0,
+                'network' => 'tcp',
+                'network_settings' => [],
+                'rules' => [],
+                'multiplex' => ['enabled' => false],
+                'utls' => ['enabled' => false, 'fingerprint' => 'chrome'],
+            ],
+            'trojan' => [
+                'tls' => 1,
+                'network' => 'tcp',
+                'network_settings' => [],
+                'tls_settings' => [
+                    'server_name' => $tlsDomain,
+                    'allow_insecure' => true,
+                ],
+                'multiplex' => ['enabled' => false],
+                'utls' => ['enabled' => false, 'fingerprint' => 'chrome'],
+            ],
+            'hysteria' => [
+                'version' => 2,
+                'bandwidth' => ['up' => null, 'down' => null],
+                'obfs' => ['open' => false, 'type' => 'salamander', 'password' => null],
+                'tls' => [
+                    'server_name' => $tlsDomain,
+                    'allow_insecure' => true,
+                ],
+                'hop_interval' => null,
+            ],
+            'tuic' => [
+                'version' => 5,
+                'congestion_control' => 'cubic',
+                'alpn' => ['h3'],
+                'udp_relay_mode' => 'native',
+                'tls' => [
+                    'server_name' => $tlsDomain,
+                    'allow_insecure' => true,
+                ],
+            ],
+            'anytls' => [
+                'tls' => [
+                    'server_name' => $tlsDomain,
+                    'allow_insecure' => true,
+                ],
+                'padding_scheme' => [
+                    'stop=8',
+                    '0=30-30',
+                    '1=100-400',
+                    '2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000',
+                    '3=9-9,500-1000',
+                    '4=500-1000',
+                    '5=500-1000',
+                    '6=500-1000',
+                    '7=500-1000',
+                ],
+            ],
+        };
+
+        $payload = [
+            'type' => $type,
+            'name' => $params['name'],
+            'host' => $params['host'],
+            'port' => (string) $port,
+            'server_port' => $port,
+            'rate' => 1,
+            'machine_id' => $machine->id,
+            'group_ids' => array_values($params['group_ids'] ?? []),
+            'route_ids' => array_values($params['route_ids'] ?? []),
+            'tags' => ['quick-deploy'],
+            'show' => (bool) ($params['show'] ?? true),
+            'enabled' => true,
+            'transfer_enable' => 0,
+            'protocol_settings' => $protocolSettings,
+        ];
+
+        if ($needsTls) {
+            // xboard-node expects literal "self" (not "self-signed").
+            $payload['cert_config'] = [
+                'cert_mode' => 'self',
+                'domain' => $tlsDomain,
+            ];
+        }
+
+        try {
+            $server = Server::create($payload);
+        } catch (Throwable $e) {
+            Log::error($e);
+            return $this->fail([500, '一键部署节点创建失败']);
+        }
+
+        return $this->success([
+            'id' => $server->id,
+            'name' => $server->name,
+            'type' => $server->type,
+            'host' => $server->host,
+            'port' => $server->port,
+            'server_port' => $server->server_port,
+            'machine_id' => $server->machine_id,
+            'cert_mode' => data_get($server->cert_config, 'cert_mode'),
+        ]);
+    }
+
+    private function allocateQuickPort(): int
+    {
+        for ($i = 0; $i < 100; $i++) {
+            $port = random_int(20000, 59999);
+            $used = Server::query()
+                ->where('server_port', $port)
+                ->orWhere('port', (string) $port)
+                ->exists();
+
+            if (!$used) {
+                return $port;
+            }
+        }
+
+        throw new RuntimeException('无法分配可用端口');
     }
 
     public function save(ServerSave $request)

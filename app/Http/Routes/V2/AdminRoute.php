@@ -56,6 +56,7 @@ class AdminRoute
                 $router->post('/batchUpdate', [ManageController::class, 'batchUpdate']);
                 $router->post('/batchResetTraffic', [ManageController::class, 'batchResetTraffic']);
                 $router->get('/generateEchKey', [ManageController::class, 'generateEchKey']);
+                $router->post('/quickDeploy', [ManageController::class, 'quickDeploy']);
             });
 
             $router->group(['prefix' => 'server/machine'], function ($router) {
