@@ -14,10 +14,7 @@ use Illuminate\Support\Str;
  * @property string $token 认证 Token
  * @property string|null $notes 备注
  * @property bool $is_active 是否启用
- * @property string $agent_driver 机器驱动：xboard-node / nobrand-oneclick
  * @property int|null $last_seen_at 最后心跳时间
- * @property int|null $policy_last_seen_at NoBrand Policy Agent 最后心跳
- * @property array|null $policy_status NoBrand 策略同步状态
  * @property array|null $load_status 负载状态
  * @property \Illuminate\Support\Carbon $created_at
  * @property \Illuminate\Support\Carbon $updated_at
@@ -33,8 +30,6 @@ class ServerMachine extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'last_seen_at' => 'integer',
-        'policy_last_seen_at' => 'integer',
-        'policy_status' => 'array',
         'load_status' => 'array',
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp',
