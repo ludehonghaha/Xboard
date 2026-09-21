@@ -4,7 +4,6 @@ namespace App\Services\Auth;
 
 use App\Models\InviteCode;
 use App\Models\User;
-use App\Services\CaptchaService;
 use App\Services\Plugin\HookManager;
 use App\Services\UserService;
 use App\Utils\CacheKey;
@@ -28,12 +27,6 @@ class RegisterService
                     'minute' => admin_setting('register_limit_expire', 60)
                 ])]];
             }
-        }
-
-        $captchaService = app(CaptchaService::class);
-        [$captchaValid, $captchaError] = $captchaService->verify($request);
-        if (!$captchaValid) {
-            return [false, $captchaError];
         }
 
         if ((int) admin_setting('email_whitelist_enable', 0)) {

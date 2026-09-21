@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Plugin\PluginManager;
 use Illuminate\Console\Command;
 use Illuminate\Encryption\Encrypter;
 use App\Models\User;
@@ -174,10 +173,6 @@ class XboardInstall extends Command
             if (!self::registerAdmin($email, $password)) {
                 abort(500, '管理员账号注册失败，请重试');
             }
-            $this->info('正在安装默认插件...');
-            PluginManager::installDefaultPlugins();
-            $this->info('默认插件安装完成');
-
             $this->info('🎉：一切就绪');
             $this->info("管理员邮箱：{$email}");
             $this->info("管理员密码：{$password}");

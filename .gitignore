@@ -32,3 +32,6 @@ compose.yaml
 compose.host.yaml
 compose.split.yaml
 .scribe
+.preview-data-v2-*
+
+.preview-data-*

@@ -2,11 +2,9 @@
 
 namespace App\Console\Commands;
 
-use App\Services\ThemeService;
 use App\Services\UpdateService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
-use App\Services\Plugin\PluginManager;
 
 class XboardUpdate extends Command
 {
@@ -44,13 +42,8 @@ class XboardUpdate extends Command
         $this->info('正在导入数据库请稍等...');
         Artisan::call("migrate", ['--force' => true]);
         $this->info(Artisan::output());
-        $this->info('正在检查并安装默认插件...');
-        PluginManager::installDefaultPlugins();
-        $this->info('默认插件检查完成');
         $updateService = new UpdateService();
         $updateService->updateVersionCache();
-        $themeService = app(ThemeService::class);
-        $themeService->refreshCurrentTheme();
         if (config('queue.default') === 'sync') {
             $this->info('horizon:terminate skipped (sync queue, no workers to terminate).');
         } else {

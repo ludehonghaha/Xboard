@@ -129,7 +129,6 @@ return [
 
     'warm' => [
         ...Octane::defaultServicesToWarm(),
-        \App\Services\Plugin\PluginManager::class,
     ],
 
     'flush' => [

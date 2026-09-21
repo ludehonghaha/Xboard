@@ -115,23 +115,12 @@ class ConfigController extends Controller
                 'email_whitelist_enable' => (bool) admin_setting('email_whitelist_enable', 0),
                 'email_whitelist_suffix' => admin_setting('email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT),
                 'email_gmail_limit_enable' => (bool) admin_setting('email_gmail_limit_enable', 0),
-                'captcha_enable' => (bool) admin_setting('captcha_enable', 0),
-                'captcha_type' => admin_setting('captcha_type', 'recaptcha'),
-                'recaptcha_key' => admin_setting('recaptcha_key', ''),
-                'recaptcha_site_key' => admin_setting('recaptcha_site_key', ''),
-                'recaptcha_v3_secret_key' => admin_setting('recaptcha_v3_secret_key', ''),
-                'recaptcha_v3_site_key' => admin_setting('recaptcha_v3_site_key', ''),
-                'recaptcha_v3_score_threshold' => admin_setting('recaptcha_v3_score_threshold', 0.5),
-                'turnstile_secret_key' => admin_setting('turnstile_secret_key', ''),
-                'turnstile_site_key' => admin_setting('turnstile_site_key', ''),
                 'register_limit_by_ip_enable' => (bool) admin_setting('register_limit_by_ip_enable', 0),
                 'register_limit_count' => admin_setting('register_limit_count', 3),
                 'register_limit_expire' => admin_setting('register_limit_expire', 60),
                 'password_limit_enable' => (bool) admin_setting('password_limit_enable', 1),
                 'password_limit_count' => admin_setting('password_limit_count', 5),
                 'password_limit_expire' => admin_setting('password_limit_expire', 60),
-                // 保持向后兼容
-                'recaptcha_enable' => (bool) admin_setting('captcha_enable', 0)
             ],
             'subscribe_template' => [
                 'subscribe_template_singbox' => $this->formatTemplateContent(

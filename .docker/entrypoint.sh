@@ -3,14 +3,14 @@ set -e
 
 # Resolve the binding scheme based on whether the embedded Caddy is enabled.
 #
-# When ENABLE_CADDY=true (default), Caddy owns the public port (7001) and
+# When ENABLE_PROXY=true (default), Caddy owns the public port (7001) and
 # dispatches traffic internally; Octane and ws-server bind to localhost only
 # so they cannot be reached from outside the container.
 #
-# When ENABLE_CADDY=false (e.g. an external reverse proxy or split mode),
+# When ENABLE_PROXY=false (e.g. an external reverse proxy or split mode),
 # Octane takes the public port directly to keep behaviour identical to the
 # pre-Caddy releases.
-if [ "${ENABLE_CADDY}" = "true" ]; then
+if [ "${ENABLE_PROXY}" = "true" ]; then
     : "${OCTANE_HOST:=127.0.0.1}"
     : "${OCTANE_PORT:=7002}"
     : "${WS_HOST:=127.0.0.1}"
@@ -143,7 +143,7 @@ else
     fi
 fi
 
-echo "[entrypoint] Starting services (caddy=${ENABLE_CADDY} web=${ENABLE_WEB} horizon=${ENABLE_HORIZON} ws=${ENABLE_WS_SERVER})..."
+echo "[entrypoint] Starting services (proxy=${ENABLE_PROXY} web=${ENABLE_WEB} horizon=${ENABLE_HORIZON} ws=${ENABLE_WS_SERVER})..."
 # Drop stale Octane/WorkerMan state files so the new master does not signal
 # PIDs left over from a previous container run (causes Swoole kill EPERM).
 rm -f /www/storage/logs/octane-server-state.json /www/storage/logs/xboard-ws-server.pid 2>/dev/null || true
