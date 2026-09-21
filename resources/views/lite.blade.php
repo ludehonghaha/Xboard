@@ -22,6 +22,7 @@
   <script>
     window.XBOARD_LITE = @json($liteConfig);
   </script>
+  <script src="/lite/qrcode.min.js?v={{ $version }}" defer></script>
   <script src="/lite/app.js?v={{ $version }}" defer></script>
 </body>
 </html>

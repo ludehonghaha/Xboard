@@ -51,18 +51,22 @@ class ManageController extends Controller
     }
 
     /**
-     * Create a machine-bound node from a minimal one-click template.
+     * Create a machine-bound node from a one-click protocol profile.
      * The Server observer notifies machine mode immediately after creation.
      */
     public function quickDeploy(Request $request)
     {
         $params = $request->validate([
             'machine_id' => 'required|integer|exists:v2_server_machine,id',
-            'protocol' => 'required|string|in:mieru,shadowsocks,vless,vmess,trojan,hysteria,tuic,anytls',
+            'protocol' => 'required|string|in:mieru,shadowsocks,vless,vmess,trojan,hysteria,tuic,anytls,socks,naive,http',
+            'security' => 'nullable|string|in:none,tls,reality',
+            'enable_ech' => 'nullable|boolean',
             'name' => 'required|string|max:100',
             'host' => 'required|string|max:255',
             'port' => 'nullable|integer|min:1|max:65535',
             'tls_domain' => 'nullable|string|max:253',
+            'reality_server_name' => 'nullable|string|max:253',
+            'reality_server_port' => 'nullable|integer|min:1|max:65535',
             'show' => 'nullable|boolean',
             'group_ids' => 'nullable|array',
             'group_ids.*' => 'integer',
@@ -76,6 +80,26 @@ class ManageController extends Controller
         }
 
         $type = $params['protocol'];
+        $allowedSecurity = match ($type) {
+            'vless' => ['none', 'tls', 'reality'],
+            'vmess' => ['none', 'tls'],
+            'trojan' => ['tls', 'reality'],
+            'hysteria', 'tuic', 'anytls', 'naive' => ['tls'],
+            'http' => ['none', 'tls'],
+            default => ['none'],
+        };
+        $defaultSecurity = in_array('none', $allowedSecurity, true) ? 'none' : $allowedSecurity[0];
+        $security = (string) ($params['security'] ?? $defaultSecurity);
+        if (!in_array($security, $allowedSecurity, true)) {
+            return $this->fail([400, "协议 {$type} 不支持安全模式 {$security}"]);
+        }
+
+        $enableEch = (bool) ($params['enable_ech'] ?? false);
+        $echCapable = in_array($type, ['vless', 'vmess', 'trojan', 'hysteria', 'tuic', 'anytls', 'naive', 'http'], true);
+        if ($enableEch && ($security !== 'tls' || !$echCapable)) {
+            return $this->fail([400, 'ECH 只能用于支持 TLS 的协议模板']);
+        }
+
         $port = (int) ($params['port'] ?? 0);
         if ($port === 0) {
             $port = $this->allocateQuickPort();
@@ -84,10 +108,54 @@ class ManageController extends Controller
         }
 
         $tlsDomain = trim((string) ($params['tls_domain'] ?? ''));
-        $needsTls = in_array($type, ['trojan', 'hysteria', 'tuic', 'anytls'], true);
-        if ($needsTls && $tlsDomain === '') {
-            return $this->fail([400, '该协议需要 TLS 域名/SNI；可填写任意用于自签证书的域名']);
+        if ($security === 'tls' && $tlsDomain === '') {
+            $tlsDomain = 'node.local';
         }
+
+        $tlsSettings = null;
+        $echMaterial = null;
+        if ($security === 'tls') {
+            $tlsSettings = [
+                'server_name' => $tlsDomain,
+                'allow_insecure' => true,
+            ];
+            if ($enableEch) {
+                $echMaterial = $this->makeEchMaterial($tlsDomain);
+                $tlsSettings['ech'] = [
+                    'enabled' => true,
+                    'key' => $echMaterial['key'],
+                    'config' => $echMaterial['config'],
+                    'query_server_name' => $tlsDomain,
+                    'key_path' => null,
+                    'config_path' => null,
+                ];
+            }
+        }
+
+        $realitySettings = null;
+        $realityKeys = null;
+        if ($security === 'reality') {
+            $realityServerName = trim((string) ($params['reality_server_name'] ?? ''));
+            if ($realityServerName === '') {
+                return $this->fail([400, 'Reality 需要目标站域名/SNI']);
+            }
+            $realityPort = (int) ($params['reality_server_port'] ?? 443);
+            $realityKeys = $this->makeRealityKeys();
+            $realitySettings = [
+                'server_name' => $realityServerName,
+                'server_port' => $realityPort,
+                'public_key' => $realityKeys['public_key'],
+                'private_key' => $realityKeys['private_key'],
+                'short_id' => $realityKeys['short_id'],
+                'allow_insecure' => false,
+            ];
+        }
+
+        $tlsMode = match ($security) {
+            'tls' => 1,
+            'reality' => 2,
+            default => 0,
+        };
 
         $protocolSettings = match ($type) {
             'mieru' => [
@@ -103,30 +171,31 @@ class ManageController extends Controller
                 'plugin_opts' => null,
             ],
             'vless' => [
-                'tls' => 0,
+                'tls' => $tlsMode,
                 'network' => 'tcp',
                 'network_settings' => [],
-                'flow' => null,
+                'tls_settings' => $tlsSettings ?? [],
+                'reality_settings' => $realitySettings ?? [],
+                'flow' => $security === 'reality' ? 'xtls-rprx-vision' : null,
                 'encryption' => ['enabled' => false, 'encryption' => null, 'decryption' => null],
                 'multiplex' => ['enabled' => false],
                 'utls' => ['enabled' => false, 'fingerprint' => 'chrome'],
             ],
             'vmess' => [
-                'tls' => 0,
+                'tls' => $tlsMode,
                 'network' => 'tcp',
                 'network_settings' => [],
                 'rules' => [],
+                'tls_settings' => $tlsSettings ?? [],
                 'multiplex' => ['enabled' => false],
                 'utls' => ['enabled' => false, 'fingerprint' => 'chrome'],
             ],
             'trojan' => [
-                'tls' => 1,
+                'tls' => $tlsMode,
                 'network' => 'tcp',
                 'network_settings' => [],
-                'tls_settings' => [
-                    'server_name' => $tlsDomain,
-                    'allow_insecure' => true,
-                ],
+                'tls_settings' => $tlsSettings ?? [],
+                'reality_settings' => $realitySettings ?? [],
                 'multiplex' => ['enabled' => false],
                 'utls' => ['enabled' => false, 'fingerprint' => 'chrome'],
             ],
@@ -134,10 +203,7 @@ class ManageController extends Controller
                 'version' => 2,
                 'bandwidth' => ['up' => null, 'down' => null],
                 'obfs' => ['open' => false, 'type' => 'salamander', 'password' => null],
-                'tls' => [
-                    'server_name' => $tlsDomain,
-                    'allow_insecure' => true,
-                ],
+                'tls' => $tlsSettings,
                 'hop_interval' => null,
             ],
             'tuic' => [
@@ -145,16 +211,10 @@ class ManageController extends Controller
                 'congestion_control' => 'cubic',
                 'alpn' => ['h3'],
                 'udp_relay_mode' => 'native',
-                'tls' => [
-                    'server_name' => $tlsDomain,
-                    'allow_insecure' => true,
-                ],
+                'tls' => $tlsSettings,
             ],
             'anytls' => [
-                'tls' => [
-                    'server_name' => $tlsDomain,
-                    'allow_insecure' => true,
-                ],
+                'tls' => $tlsSettings,
                 'padding_scheme' => [
                     'stop=8',
                     '0=30-30',
@@ -166,6 +226,18 @@ class ManageController extends Controller
                     '6=500-1000',
                     '7=500-1000',
                 ],
+            ],
+            'socks' => [
+                'tls' => 0,
+                'tls_settings' => [],
+            ],
+            'naive' => [
+                'tls' => 1,
+                'tls_settings' => $tlsSettings,
+            ],
+            'http' => [
+                'tls' => $tlsMode,
+                'tls_settings' => $tlsSettings ?? [],
             ],
         };
 
@@ -186,7 +258,7 @@ class ManageController extends Controller
             'protocol_settings' => $protocolSettings,
         ];
 
-        if ($needsTls) {
+        if ($security === 'tls') {
             // xboard-node expects literal "self" (not "self-signed").
             $payload['cert_config'] = [
                 'cert_mode' => 'self',
@@ -205,12 +277,68 @@ class ManageController extends Controller
             'id' => $server->id,
             'name' => $server->name,
             'type' => $server->type,
+            'security' => $security,
             'host' => $server->host,
             'port' => $server->port,
             'server_port' => $server->server_port,
             'machine_id' => $server->machine_id,
             'cert_mode' => data_get($server->cert_config, 'cert_mode'),
+            'reality_public_key' => $realityKeys['public_key'] ?? null,
+            'reality_short_id' => $realityKeys['short_id'] ?? null,
+            'ech_config' => $echMaterial['config'] ?? null,
         ]);
+    }
+
+    private function makeRealityKeys(): array
+    {
+        $privateKey = random_bytes(32);
+        $publicKey = sodium_crypto_scalarmult_base($privateKey);
+
+        return [
+            'private_key' => $this->base64UrlNoPad($privateKey),
+            'public_key' => $this->base64UrlNoPad($publicKey),
+            'short_id' => bin2hex(random_bytes(8)),
+        ];
+    }
+
+    private function makeEchMaterial(string $publicName): array
+    {
+        $privateKey = random_bytes(32);
+        $publicKey = sodium_crypto_scalarmult_base($privateKey);
+        $configId = random_int(0, 255);
+
+        $contents = '';
+        $contents .= pack('C', $configId);
+        $contents .= pack('n', 0x0020);
+        $contents .= pack('n', 32) . $publicKey;
+        $contents .= pack('n', 8);
+        $contents .= pack('nn', 0x0001, 0x0001);
+        $contents .= pack('nn', 0x0001, 0x0003);
+        $contents .= pack('C', 0);
+        $contents .= pack('C', strlen($publicName)) . $publicName;
+        $contents .= pack('n', 0);
+
+        $echConfig = pack('n', 0xfe0d) . pack('n', strlen($contents)) . $contents;
+        $echConfigList = pack('n', strlen($echConfig)) . $echConfig;
+        $echKeysPayload = pack('n', 32) . $privateKey . pack('n', strlen($echConfig)) . $echConfig;
+
+        return [
+            'key' => "-----BEGIN ECH KEYS-----
+"
+                . chunk_split(base64_encode($echKeysPayload), 64, "
+")
+                . "-----END ECH KEYS-----",
+            'config' => "-----BEGIN ECH CONFIGS-----
+"
+                . chunk_split(base64_encode($echConfigList), 64, "
+")
+                . "-----END ECH CONFIGS-----",
+        ];
+    }
+
+    private function base64UrlNoPad(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     }
 
     private function allocateQuickPort(): int

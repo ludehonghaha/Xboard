@@ -15,3 +15,10 @@
 .badge.warn{background:#fef3c7;color:#92400e}
 .modal.wide{width:min(980px,100%)}
 @media(max-width:760px){.modal.wide{width:100%}}
+
+/* Lite v2.4 subscription QR */
+.subscription-share{display:flex;gap:18px;align-items:center}
+.qr-card{flex:0 0 auto}
+.qr-box{width:208px;min-height:208px;padding:10px;border:1px solid var(--line);border-radius:14px;background:#fff;display:grid;place-items:center}
+.qr-box canvas,.qr-box img{display:block;max-width:188px;max-height:188px}
+@media(max-width:700px){.subscription-share{display:grid}.qr-card{justify-self:center}}

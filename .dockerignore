@@ -33,3 +33,4 @@ bootstrap/cache/*.php
 
 .preview-v22-*
 .preview-v23-*
+.preview-v24-*

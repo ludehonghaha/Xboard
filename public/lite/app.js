@@ -149,7 +149,7 @@
         <aside class="sidebar">
           <div class="brand">${esc(cfg.title || 'Xboard Lite')}</div>
           <nav class="nav">${navItems().map(([k,t])=>`<button data-page="${k}">${t}</button>`).join('')}</nav>
-          <div class="foot">Lite v2.3 · ${esc(cfg.version || '')}</div>
+          <div class="foot">Lite v2.4 · ${esc(cfg.version || '')}</div>
         </aside>
         <main class="main">
           <header class="topbar">
@@ -205,6 +205,7 @@
     await refreshSelf();
     const s = state.sub || {};
     const used = Number(s.u||0)+Number(s.d||0), total = Number(s.transfer_enable||0);
+    const subUrl = s.subscribe_url || '';
     c.innerHTML = `
       <h1 class="page-title">我的订阅</h1>
       <div class="grid cols4">
@@ -214,14 +215,60 @@
         <div class="card metric"><div class="label">限速 / 设备</div><div class="value" style="font-size:16px">${s.speed_limit||'不限'} Mbps · ${s.device_limit||'不限'}</div></div>
       </div>
       <div class="card" style="margin-top:14px">
-        <div class="row"><b>订阅地址</b><div class="actions"><button class="btn ghost small" id="copy-sub">复制</button><button class="btn danger small" id="reset-sub">重置</button></div></div>
-        <div class="codebox" style="margin-top:12px">${esc(s.subscribe_url||'')}</div>
+        <div class="row"><b>订阅地址</b><div class="actions">
+          <button class="btn ghost small" id="copy-sub">复制</button>
+          <button class="btn ghost small" id="download-sub-qr">下载二维码</button>
+          <button class="btn danger small" id="reset-sub">重置</button>
+        </div></div>
+        <div class="subscription-share" style="margin-top:14px">
+          <div class="qr-card">
+            <div id="subscription-qr" class="qr-box"></div>
+            <div class="muted" style="font-size:12px;text-align:center;margin-top:8px">扫码导入订阅</div>
+          </div>
+          <div style="min-width:0;flex:1">
+            <div class="muted" style="font-size:12px;margin-bottom:6px">完整订阅 URL</div>
+            <div class="codebox">${esc(subUrl)}</div>
+            <div class="muted" style="font-size:12px;margin-top:10px">二维码内容与上面的订阅地址完全一致；重置订阅后旧二维码和旧地址都会立即失效。</div>
+          </div>
+        </div>
       </div>`;
-    c.querySelector('#copy-sub').onclick = async () => { await navigator.clipboard.writeText(s.subscribe_url||''); toast('已复制订阅地址'); };
+
+    const qrEl = c.querySelector('#subscription-qr');
+    if (subUrl && window.QRCode) {
+      new QRCode(qrEl, {
+        text: subUrl,
+        width: 188,
+        height: 188,
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    } else {
+      qrEl.innerHTML = '<div class="muted" style="padding:30px 8px;text-align:center">二维码组件未加载</div>';
+    }
+
+    c.querySelector('#copy-sub').onclick = async () => {
+      await navigator.clipboard.writeText(subUrl);
+      toast('已复制订阅地址');
+    };
+
+    c.querySelector('#download-sub-qr').onclick = () => {
+      const canvas = qrEl.querySelector('canvas');
+      const img = qrEl.querySelector('img');
+      const href = canvas ? canvas.toDataURL('image/png') : (img ? img.src : '');
+      if (!href) return toast('二维码尚未生成', false);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = 'xboard-subscription-qr.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    };
+
     c.querySelector('#reset-sub').onclick = async () => {
-      if (!confirm('重置后旧订阅地址立即失效，确定继续？')) return;
-      const url = await request('/api/v1/user/resetSecurity');
-      toast('订阅地址已重置'); await refreshSelf(); renderSubscription(c);
+      if (!confirm('重置后旧订阅地址和二维码立即失效，确定继续？')) return;
+      await request('/api/v1/user/resetSecurity');
+      toast('订阅地址已重置');
+      await refreshSelf();
+      renderSubscription(c);
     };
   }
 
@@ -793,6 +840,25 @@
         return;
       }
 
+      const capabilities = {
+        mieru:       {security:['none'], def:'none', ech:false},
+        shadowsocks: {security:['none'], def:'none', ech:false},
+        socks:       {security:['none'], def:'none', ech:false},
+        vless:       {security:['none','tls','reality'], def:'none', ech:true},
+        vmess:       {security:['none','tls'], def:'none', ech:true},
+        trojan:      {security:['tls','reality'], def:'tls', ech:true},
+        hysteria:    {security:['tls'], def:'tls', ech:true},
+        tuic:        {security:['tls'], def:'tls', ech:true},
+        anytls:      {security:['tls'], def:'tls', ech:true},
+        naive:       {security:['tls'], def:'tls', ech:true},
+        http:        {security:['none','tls'], def:'none', ech:true}
+      };
+      const securityNames = {
+        none:'无 / 协议原生',
+        tls:'TLS · 自动自签证书',
+        reality:'Reality · 自动生成密钥'
+      };
+
       let machineOptions = '';
       usableMachines.forEach(function(m) {
         const status = m.is_online ? '在线' : (m.last_seen_at ? '离线' : '未接入');
@@ -800,14 +866,17 @@
       });
 
       const protocolOptions = [
-        ['mieru','Mieru · TCP'],
-        ['shadowsocks','Shadowsocks · 2022'],
-        ['hysteria','Hysteria2 · 自签 TLS'],
-        ['vless','VLESS · TCP'],
-        ['vmess','VMess · TCP'],
-        ['trojan','Trojan · 自签 TLS'],
-        ['tuic','TUIC · 自签 TLS'],
-        ['anytls','AnyTLS · 自签 TLS']
+        ['mieru','Mieru'],
+        ['shadowsocks','Shadowsocks 2022'],
+        ['vless','VLESS'],
+        ['vmess','VMess'],
+        ['trojan','Trojan'],
+        ['hysteria','Hysteria2'],
+        ['tuic','TUIC'],
+        ['anytls','AnyTLS'],
+        ['socks','SOCKS'],
+        ['naive','Naive'],
+        ['http','HTTP Proxy']
       ].map(function(x) {
         return '<option value="' + x[0] + '">' + x[1] + '</option>';
       }).join('');
@@ -827,20 +896,38 @@
       const html =
         '<form id="quick-deploy-form">' +
           '<div class="card" style="margin-bottom:12px">' +
-            '<b>一键部署流程</b><div class="muted" style="margin-top:6px">保存后自动创建节点，并通知 Machine Agent 立即发现和启动服务。</div>' +
+            '<b>一键部署协议</b>' +
+            '<div class="muted" style="margin-top:6px">面板生成端口、协议参数、Reality/ECH 密钥；保存后 Machine Agent 自动发现并启动节点。</div>' +
           '</div>' +
           '<div class="split">' +
             '<div class="field"><label>服务器</label><select name="machine_id">' + machineOptions + '</select></div>' +
-            '<div class="field"><label>协议模板</label><select name="protocol">' + protocolOptions + '</select></div>' +
+            '<div class="field"><label>协议</label><select name="protocol">' + protocolOptions + '</select></div>' +
+          '</div>' +
+          '<div class="split">' +
+            '<div class="field"><label>安全模式</label><select name="security"></select></div>' +
+            '<div class="field"><label>端口</label><input name="port" type="number" min="1" max="65535" placeholder="留空自动分配 20000-59999"></div>' +
           '</div>' +
           '<div class="split">' +
             '<div class="field"><label>节点名称</label><input name="name" placeholder="例如 SG-Mieru" required></div>' +
             '<div class="field"><label>对外连接地址</label><input name="host" placeholder="服务器公网 IP 或域名" required></div>' +
           '</div>' +
-          '<div class="split">' +
-            '<div class="field"><label>端口</label><input name="port" type="number" min="1" max="65535" placeholder="留空自动分配 20000-59999"></div>' +
-            '<div class="field" id="quick-tls-wrap" style="display:none"><label>TLS SNI / 证书名称</label><input name="tls_domain" value="node.local"><span class="muted">HY2/TUIC/Trojan/AnyTLS 使用自签证书，客户端会自动允许不安全证书。</span></div>' +
+
+          '<div id="quick-tls-wrap" class="card" style="display:none;margin:12px 0">' +
+            '<b>TLS</b>' +
+            '<div class="field"><label>TLS SNI / 自签证书名称</label><input name="tls_domain" value="node.local"></div>' +
+            '<label class="field" style="margin-bottom:0"><span>ECH</span><span><input type="checkbox" name="enable_ech"> 启用 ECH，并自动生成 ECH KEYS / CONFIGS</span></label>' +
+            '<div class="muted" style="margin-top:8px">自签 TLS 会在订阅中带允许不安全证书；ECH 配置会自动写入节点和客户端订阅。</div>' +
           '</div>' +
+
+          '<div id="quick-reality-wrap" class="card" style="display:none;margin:12px 0">' +
+            '<b>Reality</b>' +
+            '<div class="split">' +
+              '<div class="field"><label>目标站 / SNI</label><input name="reality_server_name" value="www.microsoft.com"></div>' +
+              '<div class="field"><label>目标端口</label><input name="reality_server_port" type="number" min="1" max="65535" value="443"></div>' +
+            '</div>' +
+            '<div class="muted">面板会自动生成 X25519 私钥、公钥和 short ID；客户端订阅使用公钥，服务端 Agent 使用私钥。</div>' +
+          '</div>' +
+
           '<div class="field"><label>权限组</label><div class="actions">' + groupChecks + '</div></div>' +
           '<div class="field"><label>路由</label><div class="actions">' + routeChecks + '</div></div>' +
           '<div class="field"><label><input type="checkbox" name="show" checked> 立即对用户展示</label></div>' +
@@ -853,30 +940,55 @@
         box.classList.add('wide');
         const form = box.querySelector('#quick-deploy-form');
         const proto = form.querySelector('[name=protocol]');
+        const security = form.querySelector('[name=security]');
         const machine = form.querySelector('[name=machine_id]');
         const name = form.querySelector('[name=name]');
         const tlsWrap = box.querySelector('#quick-tls-wrap');
+        const realityWrap = box.querySelector('#quick-reality-wrap');
+        const echBox = form.querySelector('[name=enable_ech]');
         const summary = box.querySelector('#quick-summary');
+
+        function fillSecurity(reset) {
+          const cap = capabilities[proto.value] || capabilities.mieru;
+          const current = reset ? cap.def : security.value;
+          security.innerHTML = cap.security.map(function(v) {
+            return '<option value="' + v + '">' + securityNames[v] + '</option>';
+          }).join('');
+          security.value = cap.security.includes(current) ? current : cap.def;
+          updateQuickUi();
+        }
 
         function updateQuickUi() {
           const p = proto.value;
+          const sec = security.value;
+          const cap = capabilities[p] || capabilities.mieru;
           const m = usableMachines.find(function(x){return Number(x.id)===Number(machine.value);});
-          const tlsNeeded = ['hysteria','trojan','tuic','anytls'].includes(p);
-          tlsWrap.style.display = tlsNeeded ? '' : 'none';
-          if (!name.value.trim()) {
-            const label = p === 'hysteria' ? 'HY2' : p.toUpperCase();
-            name.placeholder = (m ? m.name : 'Node') + '-' + label;
-          }
+          const isTls = sec === 'tls';
+          const isReality = sec === 'reality';
+
+          tlsWrap.style.display = isTls ? '' : 'none';
+          realityWrap.style.display = isReality ? '' : 'none';
+          echBox.disabled = !(isTls && cap.ech);
+          if (echBox.disabled) echBox.checked = false;
+
+          const label = p === 'hysteria' ? 'HY2' : p.toUpperCase();
+          name.placeholder = (m ? m.name : 'Node') + '-' + label +
+            (isReality ? '-Reality' : (isTls ? '-TLS' : ''));
+
           const status = m ? (m.is_online ? '在线，可立即下发' : (m.last_seen_at ? '离线，创建后待 Agent 上线自动同步' : 'Agent 未接入，先完成 Agent 安装')) : '';
+          const securityText = securityNames[sec] || sec;
           summary.innerHTML =
-            '<div><b>模板：</b>' + esc(proto.options[proto.selectedIndex].text) + '</div>' +
+            '<div><b>协议：</b>' + esc(proto.options[proto.selectedIndex].text) + '</div>' +
+            '<div style="margin-top:6px"><b>安全：</b>' + esc(securityText) + (echBox.checked ? ' + ECH' : '') + '</div>' +
             '<div style="margin-top:6px"><b>服务器：</b>' + esc(m ? m.name : '') + ' · ' + esc(status) + '</div>' +
-            '<div class="muted" style="margin-top:6px">端口留空会由面板自动分配；创建后仍可进入“编辑”调整高级协议参数。</div>';
+            '<div class="muted" style="margin-top:6px">端口留空自动分配；部署后仍可进入“编辑”调整 Reality、ECH、Multiplex、传输层等高级参数。</div>';
         }
 
-        proto.onchange = updateQuickUi;
+        proto.onchange = function(){ fillSecurity(true); };
+        security.onchange = updateQuickUi;
         machine.onchange = updateQuickUi;
-        updateQuickUi();
+        echBox.onchange = updateQuickUi;
+        fillSecurity(true);
         box.querySelector('#quick-cancel').onclick = close;
 
         form.onsubmit = async function(e) {
@@ -894,10 +1006,14 @@
           const body = {
             machine_id: Number(fd.get('machine_id')),
             protocol: fd.get('protocol'),
+            security: fd.get('security'),
+            enable_ech: fd.get('enable_ech') === 'on',
             name: nodeName,
             host: String(fd.get('host') || '').trim(),
             port: fd.get('port') ? Number(fd.get('port')) : null,
             tls_domain: fd.get('tls_domain') || null,
+            reality_server_name: fd.get('reality_server_name') || null,
+            reality_server_port: fd.get('reality_server_port') ? Number(fd.get('reality_server_port')) : null,
             show: fd.get('show') === 'on',
             group_ids: groupIds,
             route_ids: routeIds
@@ -908,12 +1024,17 @@
           try {
             const data = await request(adminUrl('server/manage/quickDeploy'), {method:'POST', body:body});
             const online = selectedMachine && selectedMachine.is_online;
+            const realityExtra = data.reality_public_key ?
+              '<div class="card" style="margin-top:12px"><b>Reality 已自动生成</b><div class="muted" style="margin-top:6px">Public Key</div><div class="codebox">' + esc(data.reality_public_key) + '</div><div class="muted" style="margin-top:6px">Short ID</div><div class="codebox">' + esc(data.reality_short_id || '') + '</div></div>' : '';
+            const echExtra = data.ech_config ?
+              '<div class="success">ECH 已自动生成并写入服务端与客户端订阅。</div>' : '';
             close();
             modal('部署已创建',
               '<div class="card"><div><b>' + esc(data.name || nodeName) + '</b></div>' +
-              '<div class="muted" style="margin-top:8px">协议：' + esc(data.type || body.protocol) + '</div>' +
+              '<div class="muted" style="margin-top:8px">协议：' + esc(data.type || body.protocol) + ' · ' + esc(data.security || body.security) + '</div>' +
               '<div class="muted">地址：' + esc(data.host || body.host) + ':' + esc(data.port || '') + '</div>' +
               '<div class="muted">服务器：' + esc(selectedMachine ? selectedMachine.name : '') + '</div></div>' +
+              realityExtra + echExtra +
               '<div class="' + (online ? 'success' : 'muted') + '" style="margin-top:12px">' +
                 (online ? 'Machine Agent 在线：已发送节点发现通知，服务将自动启动。' : '节点已创建；Agent 上线后会自动发现并启动。') +
               '</div>');
