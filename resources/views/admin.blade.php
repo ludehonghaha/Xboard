@@ -451,6 +451,262 @@
         return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
       };
 
+      const nbMieruApi = async (path, options = {}) => {
+        const auth = findAdminAuth();
+        if (!auth) throw new Error('请先登录后台');
+        const base = '/api/v2/' + encodeURIComponent(window.settings.secure_path) + '/';
+        const response = await fetch(base + path, {
+          ...options,
+          headers: {
+            'Authorization': auth,
+            'Accept': 'application/json',
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(options.headers || {})
+          }
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || '请求失败');
+        return payload.data ?? payload;
+      };
+
+      const ensureNbMieruButton = () => {
+        if (!findAdminAuth() || document.getElementById('xboard-lite-nb-mieru-button')) return;
+
+        if (!document.getElementById('xboard-lite-nb-mieru-style')) {
+          const style = document.createElement('style');
+          style.id = 'xboard-lite-nb-mieru-style';
+          style.textContent =
+            '#xboard-lite-nb-mieru-button{position:fixed;right:22px;bottom:72px;z-index:9997;border:1px solid #374151;border-radius:10px;padding:10px 14px;cursor:pointer;background:#0f172a;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.18)}' +
+            '#xboard-lite-nb-mieru-overlay{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.62)}' +
+            '#xboard-lite-nb-mieru-panel{width:min(780px,96vw);max-height:88vh;overflow:auto;border-radius:14px;padding:20px;background:#111827;color:#f9fafb;box-shadow:0 24px 70px rgba(0,0,0,.45)}' +
+            '.xnb-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.xnb-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.xnb-field{display:flex;flex-direction:column;gap:6px;min-width:0}.xnb-label{font-size:12px;color:#9ca3af}.xnb-input,.xnb-select{box-sizing:border-box;width:100%;padding:9px 10px;border-radius:8px;border:1px solid #374151;background:#0b1220;color:#fff}.xnb-action{padding:8px 11px;border-radius:8px;border:1px solid #374151;background:#1f2937;color:#fff;cursor:pointer}.xnb-primary{background:#1d4ed8;border-color:#2563eb}.xnb-muted{color:#9ca3af;font-size:13px}.xnb-groups{display:flex;gap:8px;flex-wrap:wrap;padding:10px;border:1px solid #273244;border-radius:8px;background:#0b1220}.xnb-chip{display:inline-flex;gap:6px;align-items:center;padding:5px 8px;border:1px solid #374151;border-radius:999px;font-size:12px}.xnb-preview{margin-top:12px;padding:12px;border:1px solid #273244;border-radius:8px;background:#020617;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all}@media(max-width:640px){.xnb-grid{grid-template-columns:1fr}}';
+          document.head.appendChild(style);
+        }
+
+        const button = document.createElement('button');
+        button.id = 'xboard-lite-nb-mieru-button';
+        button.type = 'button';
+        button.textContent = 'NB 专线 Mieru';
+
+        const overlay = document.createElement('div');
+        overlay.id = 'xboard-lite-nb-mieru-overlay';
+        overlay.innerHTML =
+          '<div id="xboard-lite-nb-mieru-panel">' +
+            '<div class="xnb-row" style="justify-content:space-between"><div><h2 style="margin:0">NB 专线 Mieru</h2><div class="xnb-muted">Xboard-Node 原生 Mieru；不安装 ike / NoBrand-OneClick。</div></div><button type="button" class="xnb-action" id="xnb-close">关闭</button></div>' +
+            '<div class="xnb-muted" style="margin-top:10px">入口地址和入口端口写入客户端订阅；后端监听端口由 Xboard-Node 在目标机器上实际监听。</div>' +
+            '<div class="xnb-grid" style="margin-top:16px">' +
+              '<label class="xnb-field"><span class="xnb-label">Xboard-Node 机器</span><select id="xnb-machine" class="xnb-select"></select></label>' +
+              '<label class="xnb-field"><span class="xnb-label">节点名称</span><input id="xnb-name" class="xnb-input" placeholder="例如 NB-CM-JP-Mieru"></label>' +
+              '<label class="xnb-field"><span class="xnb-label">专线入口 IP / 域名</span><input id="xnb-host" class="xnb-input" placeholder="例如 211.136.162.184"></label>' +
+              '<label class="xnb-field"><span class="xnb-label">入口端口（客户端连接）</span><input id="xnb-port" class="xnb-input" type="number" min="1" max="65535" placeholder="例如 4939"></label>' +
+              '<label class="xnb-field"><span class="xnb-label">后端监听端口</span><input id="xnb-server-port" class="xnb-input" type="number" min="1" max="65535" placeholder="默认与入口端口相同"></label>' +
+              '<label class="xnb-field"><span class="xnb-label">Mieru Transport</span><select id="xnb-transport" class="xnb-select"><option value="TCP">TCP（推荐）</option><option value="UDP">UDP</option></select></label>' +
+              '<label class="xnb-field"><span class="xnb-label">流量倍率</span><input id="xnb-rate" class="xnb-input" type="number" min="0" step="0.1" value="1"></label>' +
+              '<div class="xnb-field"><span class="xnb-label">节点状态</span><div class="xnb-row" style="height:38px"><label><input id="xnb-show" type="checkbox" checked> 订阅显示</label><label><input id="xnb-enabled" type="checkbox" checked> 启用服务</label></div></div>' +
+            '</div>' +
+            '<div style="margin-top:12px"><div class="xnb-label" style="margin-bottom:6px">权限组（至少选一个）</div><div id="xnb-groups" class="xnb-groups"><span class="xnb-muted">正在加载…</span></div></div>' +
+            '<div id="xnb-preview" class="xnb-preview">等待填写入口信息…</div>' +
+            '<div class="xnb-row" style="margin-top:14px"><button type="button" class="xnb-action xnb-primary" id="xnb-create">创建 NB 专线 Mieru</button><button type="button" class="xnb-action" id="xnb-refresh">刷新机器/权限组</button></div>' +
+            '<div id="xnb-message" class="xnb-muted" style="min-height:20px;margin-top:10px"></div>' +
+          '</div>';
+
+        document.body.append(button, overlay);
+
+        const machineSelect = overlay.querySelector('#xnb-machine');
+        const groupsBox = overlay.querySelector('#xnb-groups');
+        const message = overlay.querySelector('#xnb-message');
+        const preview = overlay.querySelector('#xnb-preview');
+        const portField = overlay.querySelector('#xnb-port');
+        const serverPortField = overlay.querySelector('#xnb-server-port');
+        let serverPortManuallyEdited = false;
+
+        const setMessage = (value, error = false) => {
+          message.textContent = value || '';
+          message.style.color = error ? '#fca5a5' : '#9ca3af';
+        };
+
+        const updatePreview = () => {
+          const host = overlay.querySelector('#xnb-host').value.trim() || '<入口IP>';
+          const port = Number(portField.value || 0) || '<入口端口>';
+          const serverPort = Number(serverPortField.value || 0) || port;
+          const transport = overlay.querySelector('#xnb-transport').value;
+          preview.textContent =
+            '客户端订阅: ' + host + ':' + port + '\n' +
+            '目标机器监听: 0.0.0.0:' + serverPort + '\n' +
+            '协议: Mieru / ' + transport + '\n' +
+            '认证: Xboard 用户 UUID（由 Xboard 自动管理）';
+        };
+
+        portField.addEventListener('input', () => {
+          if (!serverPortManuallyEdited) serverPortField.value = portField.value;
+          updatePreview();
+        });
+        serverPortField.addEventListener('input', () => {
+          serverPortManuallyEdited = serverPortField.value !== '' && serverPortField.value !== portField.value;
+          updatePreview();
+        });
+        overlay.querySelector('#xnb-host').addEventListener('input', updatePreview);
+        overlay.querySelector('#xnb-transport').addEventListener('change', updatePreview);
+
+        const loadOptions = async () => {
+          setMessage('正在加载机器和权限组…');
+          try {
+            const [machinesRaw, groupsRaw] = await Promise.all([
+              nbMieruApi('server/machine/fetch'),
+              nbMieruApi('server/group/fetch')
+            ]);
+
+            const machines = Array.isArray(machinesRaw) ? machinesRaw : [];
+            const groups = Array.isArray(groupsRaw) ? groupsRaw : [];
+
+            machineSelect.replaceChildren();
+            for (const item of machines) {
+              if (item.is_active === false) continue;
+              const option = document.createElement('option');
+              option.value = String(item.id);
+              const online = item.last_seen_at && (Date.now() / 1000 - Number(item.last_seen_at) < 180);
+              option.textContent = (item.name || ('#' + item.id)) + (online ? ' · 在线' : ' · 未在线') + ' · ' + Number(item.servers_count || 0) + ' 节点';
+              machineSelect.appendChild(option);
+            }
+            if (!machineSelect.options.length) {
+              const option = document.createElement('option');
+              option.value = '';
+              option.textContent = '暂无可用 Xboard-Node 机器';
+              machineSelect.appendChild(option);
+            }
+
+            groupsBox.replaceChildren();
+            for (const group of groups) {
+              const label = document.createElement('label');
+              label.className = 'xnb-chip';
+              const input = document.createElement('input');
+              input.type = 'checkbox';
+              input.value = String(group.id);
+              const span = document.createElement('span');
+              span.textContent = group.name || ('组 #' + group.id);
+              label.append(input, span);
+              groupsBox.appendChild(label);
+            }
+            if (!groups.length) {
+              const span = document.createElement('span');
+              span.className = 'xnb-muted';
+              span.textContent = '暂无权限组，请先创建服务器权限组';
+              groupsBox.appendChild(span);
+            }
+
+            setMessage('已加载 ' + machines.length + ' 台机器、' + groups.length + ' 个权限组');
+          } catch (e) {
+            setMessage(e.message, true);
+          }
+        };
+
+        overlay.querySelector('#xnb-create').onclick = async () => {
+          const machineId = Number(machineSelect.value || 0);
+          const host = overlay.querySelector('#xnb-host').value.trim();
+          const port = Number(portField.value || 0);
+          const serverPort = Number(serverPortField.value || port || 0);
+          const transport = overlay.querySelector('#xnb-transport').value;
+          const rate = Number(overlay.querySelector('#xnb-rate').value || 1);
+          const groupIds = Array.from(groupsBox.querySelectorAll('input[type="checkbox"]:checked')).map((item) => String(item.value));
+          let name = overlay.querySelector('#xnb-name').value.trim();
+
+          if (!machineId) return setMessage('请选择可用的 Xboard-Node 机器', true);
+          if (!host) return setMessage('请输入 NB 专线入口 IP 或域名', true);
+          if (!Number.isInteger(port) || port < 1 || port > 65535) return setMessage('入口端口必须是 1-65535', true);
+          if (!Number.isInteger(serverPort) || serverPort < 1 || serverPort > 65535) return setMessage('后端监听端口必须是 1-65535', true);
+          if (!groupIds.length) return setMessage('至少选择一个权限组', true);
+          if (!Number.isFinite(rate) || rate < 0) return setMessage('流量倍率不能小于 0', true);
+
+          if (!name) {
+            const tail = host.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(-20) || 'NB';
+            name = 'NB-Mieru-' + tail + '-' + port;
+          }
+
+          const payload = {
+            type: 'mieru',
+            name,
+            machine_id: machineId,
+            host,
+            port,
+            server_port: serverPort,
+            group_ids: groupIds,
+            route_ids: [],
+            tags: ['NB专线'],
+            show: overlay.querySelector('#xnb-show').checked ? 1 : 0,
+            enabled: overlay.querySelector('#xnb-enabled').checked,
+            rate,
+            rate_time_enable: false,
+            protocol_settings: {
+              transport,
+              traffic_pattern: ''
+            },
+            transfer_enable: 0
+          };
+
+          setMessage('正在创建节点…');
+          try {
+            await nbMieruApi('server/manage/save', {
+              method: 'POST',
+              body: JSON.stringify(payload)
+            });
+            overlay.querySelector('#xnb-name').value = '';
+            setMessage('创建成功：' + name + '。Xboard-Node 会按现有同步机制接管该 Mieru 节点。');
+          } catch (e) {
+            setMessage(e.message, true);
+          }
+        };
+
+        button.onclick = () => {
+          overlay.style.display = 'flex';
+          updatePreview();
+          loadOptions();
+        };
+        overlay.querySelector('#xnb-close').onclick = () => overlay.style.display = 'none';
+        overlay.querySelector('#xnb-refresh').onclick = loadOptions;
+        overlay.addEventListener('click', (event) => {
+          if (event.target === overlay) overlay.style.display = 'none';
+        });
+      };
+
+      const ensureNbMieruNavigation = () => {
+        const fallback = document.getElementById('xboard-lite-nb-mieru-button');
+        const existing = document.getElementById('xboard-lite-nb-mieru-nav');
+        if (existing?.isConnected) {
+          if (fallback) fallback.style.display = 'none';
+          return;
+        }
+
+        const labels = new Set(['节点管理', 'Node Management', 'Серверы']);
+        const candidates = Array.from(document.querySelectorAll('a,button,[role="menuitem"]'));
+        const source = candidates.find((node) => labels.has((node.textContent || '').replace(/\s+/g, ' ').trim()));
+
+        if (!source || !source.parentElement || !fallback) {
+          if (fallback) fallback.style.display = '';
+          return;
+        }
+
+        const nav = source.cloneNode(true);
+        nav.id = 'xboard-lite-nb-mieru-nav';
+        nav.removeAttribute('href');
+        nav.removeAttribute('aria-current');
+        nav.removeAttribute('data-state');
+        nav.querySelectorAll('[aria-current]').forEach((node) => node.removeAttribute('aria-current'));
+
+        const spans = Array.from(nav.querySelectorAll('span'));
+        const textSpan = spans.find((span) => labels.has((span.textContent || '').replace(/\s+/g, ' ').trim()));
+        if (textSpan) textSpan.textContent = 'NB 专线 Mieru';
+        else nav.textContent = 'NB 专线 Mieru';
+
+        nav.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          fallback.click();
+        });
+
+        source.parentElement.insertBefore(nav, source.nextSibling);
+        fallback.style.display = 'none';
+      };
+
       const ensureAccessInviteButton = () => {
         if (!findAdminAuth() || document.getElementById('xboard-lite-invite-button')) return;
 
@@ -656,7 +912,9 @@
           hideRemovedPanels();
           hideRemovedFields();
           hideRemovedColumns();
+          ensureNbMieruButton();
           ensureAccessInviteButton();
+          ensureNbMieruNavigation();
           ensureLiteNavigation();
           ensureLiteDashboard();
         });
