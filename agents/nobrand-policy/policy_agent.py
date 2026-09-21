@@ -280,8 +280,16 @@ def reconcile_once(cfg: Config) -> list[dict[str, Any]]:
     if not isinstance(policies, list):
         raise RuntimeError("panel policy response has no policies array")
 
-    users = export_users()
     results: list[dict[str, Any]] = []
+
+    if not policies:
+        api_post(cfg, "/api/v2/server/machine/nobrand-policy-status", {
+            "agent_version": VERSION,
+            "results": [],
+        })
+        return results
+
+    users = export_users()
 
     for policy in policies:
         if not isinstance(policy, dict):
