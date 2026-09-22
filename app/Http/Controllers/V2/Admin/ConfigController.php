@@ -137,6 +137,18 @@ class ConfigController extends Controller
                 SubscribeTemplate::setContent($templateKeys[$k], $v);
                 continue;
             }
+
+            if (in_array($k, ['app_url', 'server_ws_url'], true) && is_string($v)) {
+                $v = rtrim(trim($v), '/');
+            }
+
+            if ($k === 'subscribe_url' && is_string($v)) {
+                $v = collect(explode(',', $v))
+                    ->map(fn ($url) => rtrim(trim($url), '/'))
+                    ->filter()
+                    ->implode(',');
+            }
+
             admin_setting([$k => $v]);
         }
 

@@ -151,7 +151,7 @@
         <aside class="sidebar">
           <div class="brand">${esc(cfg.title || 'Xboard Lite')}</div>
           <nav class="nav">${navItems().map(([k,t])=>`<button data-page="${k}">${t}</button>`).join('')}</nav>
-          <div class="foot">Lite v3 preview · ${esc(cfg.version || '')}</div>
+          <div class="foot">Lite v3 · ${esc(cfg.version || '')}</div>
         </aside>
         <main class="main">
           <header class="topbar">
@@ -276,22 +276,86 @@
   }
 
   async function renderAccount(c) {
-    c.innerHTML = `
-      <h1 class="page-title">账号安全</h1>
-      <div class="card" style="max-width:560px">
-        <div class="muted">当前账号：${esc(state.user?.email||'')}</div>
-        <form id="pwd">
-          <div class="field"><label>当前密码</label><input type="password" name="old_password" minlength="8" required></div>
-          <div class="field"><label>新密码</label><input type="password" name="new_password" minlength="8" required></div>
-          <div class="actions"><button class="btn primary">修改密码</button></div>
-          <div id="pwd-msg"></div>
-        </form>
-      </div>`;
-    c.querySelector('#pwd').onsubmit = async e => {
-      e.preventDefault(); const msg = c.querySelector('#pwd-msg');
-      try { await request('/api/v1/user/changePassword',{method:'POST',body:Object.fromEntries(new FormData(e.currentTarget).entries())}); msg.className='success'; msg.textContent='密码已修改'; e.currentTarget.reset(); }
-      catch(err){ msg.className='error'; msg.textContent=err.message; }
+    let sessions = [];
+    try { sessions = await request('/api/v1/user/getActiveSession') || []; }
+    catch (_) { sessions = []; }
+
+    function sessionDate(v) {
+      if (!v) return '—';
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? esc(String(v)) : d.toLocaleString();
+    }
+
+    const rows = sessions.map(function(s) {
+      return '<tr>' +
+        '<td><b>会话 #' + esc(s.id) + '</b>' + (s.is_current ? ' <span class="badge good">当前</span>' : '') +
+          '<div class="muted" style="font-size:12px">' + esc(s.name || '') + '</div></td>' +
+        '<td>' + sessionDate(s.created_at) + '</td>' +
+        '<td>' + sessionDate(s.last_used_at) + '</td>' +
+        '<td>' + sessionDate(s.expires_at) + '</td>' +
+        '<td>' + (s.is_current ? '<span class="muted">当前会话</span>' :
+          '<button class="btn danger small" data-drop-session="' + esc(s.id) + '">注销</button>') + '</td>' +
+      '</tr>';
+    }).join('') || '<tr><td colspan="5" class="muted">暂无活跃会话</td></tr>';
+
+    c.innerHTML =
+      '<h1 class="page-title">账号安全</h1>' +
+      '<div class="grid cols2">' +
+        '<div class="card">' +
+          '<b>修改密码</b>' +
+          '<div class="muted" style="margin-top:6px">当前账号：' + esc(state.user?.email || '') + '</div>' +
+          '<form id="pwd" style="margin-top:12px">' +
+            '<div class="field"><label>当前密码</label><input type="password" name="old_password" minlength="8" required></div>' +
+            '<div class="field"><label>新密码</label><input type="password" name="new_password" minlength="8" required></div>' +
+            '<div class="actions"><button class="btn primary">修改密码</button></div>' +
+            '<div id="pwd-msg"></div>' +
+          '</form>' +
+        '</div>' +
+        '<div class="card">' +
+          '<b>登录会话</b>' +
+          '<div class="muted" style="margin-top:6px">可以注销其他设备的登录。当前正在使用的会话不会在这里误删。</div>' +
+          '<div style="font-size:28px;font-weight:700;margin-top:18px">' + sessions.length + '</div>' +
+          '<div class="muted">个活跃会话</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card" style="margin-top:14px">' +
+        '<div class="row"><b>活跃会话</b><button class="btn ghost small" id="refresh-sessions">刷新</button></div>' +
+        '<div class="table-wrap" style="margin-top:10px"><table>' +
+          '<thead><tr><th>会话</th><th>创建</th><th>最后使用</th><th>过期</th><th></th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div>' +
+      '</div>';
+
+    c.querySelector('#pwd').onsubmit = async function(e) {
+      e.preventDefault();
+      const msg = c.querySelector('#pwd-msg');
+      try {
+        await request('/api/v1/user/changePassword',{method:'POST',body:Object.fromEntries(new FormData(e.currentTarget).entries())});
+        msg.className='success';
+        msg.textContent='密码已修改';
+        e.currentTarget.reset();
+      } catch(err) {
+        msg.className='error';
+        msg.textContent=err.message;
+      }
     };
+
+    c.querySelector('#refresh-sessions').onclick = function(){ renderAccount(c); };
+    c.querySelectorAll('[data-drop-session]').forEach(function(b) {
+      b.onclick = async function() {
+        if (!confirm('注销这个登录会话？该设备需要重新登录。')) return;
+        try {
+          await request('/api/v1/user/removeActiveSession',{
+            method:'POST',
+            body:{session_id:Number(b.dataset.dropSession)}
+          });
+          toast('会话已注销');
+          renderAccount(c);
+        } catch(err) {
+          toast(err.message,false);
+        }
+      };
+    });
   }
 
   async function loadPlansGroups() {
@@ -1654,6 +1718,7 @@
       '<h1 class="page-title">系统设置</h1>' +
       '<div class="tabs" id="setting-tabs">' +
         '<button class="tab active" data-stab="site">站点</button>' +
+        '<button class="tab" data-stab="access">外部访问</button>' +
         '<button class="tab" data-stab="subscribe">订阅</button>' +
         '<button class="tab" data-stab="server">节点服务</button>' +
         '<button class="tab" data-stab="safe">安全</button>' +
@@ -1670,11 +1735,34 @@
         return '<form class="card" id="settings-form">' +
           '<div class="field"><label>站点名称</label><input name="app_name" value="' + esc(site.app_name || '') + '"></div>' +
           '<div class="field"><label>站点描述</label><input name="app_description" value="' + esc(site.app_description || '') + '"></div>' +
-          '<div class="field"><label>站点地址</label><input name="app_url" value="' + esc(site.app_url || '') + '"></div>' +
-          '<div class="field"><label>订阅地址</label><input name="subscribe_url" value="' + esc(site.subscribe_url || '') + '"></div>' +
-          '<div class="split">' + checkbox('force_https','强制 HTTPS',site.force_https) + checkbox('stop_register','停止注册',site.stop_register) + '</div>' +
+          '<div class="field"><label>服务条款 URL</label><input name="tos_url" value="' + esc(site.tos_url || '') + '"></div>' +
+          checkbox('stop_register','停止注册',site.stop_register) +
           '<button class="btn primary">保存</button><div id="sm"></div></form>';
       }
+
+      if (key === 'access') {
+        const panel = site.app_url || '';
+        const subscribe = site.subscribe_url || panel;
+        const ws = server.server_ws_url || '';
+        const samplePath = sub.subscribe_path || 's';
+        return '<form class="card" id="settings-form">' +
+          '<div class="muted" style="margin-bottom:14px">统一管理所有对外 URL。Machine Agent 安装命令使用 Panel URL；用户二维码使用 Subscription URL；实时节点同步使用 WebSocket URL。</div>' +
+          '<div class="field"><label>Panel URL</label><input name="app_url" placeholder="https://xboard.example.com" value="' + esc(panel) + '">' +
+            '<span class="muted">后台、API、Machine Agent 的主入口。保存时自动去掉末尾 /。</span></div>' +
+          '<div class="field"><label>Subscription URL</label><input name="subscribe_url" placeholder="留空则跟随 Panel URL" value="' + esc(site.subscribe_url || '') + '">' +
+            '<span class="muted">可填写多个地址并用英文逗号分隔；留空时订阅自动使用 Panel URL。</span></div>' +
+          '<div class="field"><label>WebSocket URL</label><input name="server_ws_url" placeholder="留空自动推导" value="' + esc(ws) + '">' +
+            '<span class="muted">Machine Agent 实时同步地址；没有独立 WS 域名时建议留空。</span></div>' +
+          checkbox('force_https','强制 HTTPS',site.force_https) +
+          '<div class="card" style="margin:14px 0;background:transparent">' +
+            '<b>当前解析预览</b>' +
+            '<div class="muted" style="margin-top:8px">Panel：<span class="mono">' + esc(panel || '未设置') + '</span></div>' +
+            '<div class="muted">Subscription：<span class="mono">' + esc((subscribe || '未设置') + (subscribe ? '/' + samplePath + '/…' : '')) + '</span></div>' +
+            '<div class="muted">WebSocket：<span class="mono">' + esc(ws || '自动') + '</span></div>' +
+          '</div>' +
+          '<button class="btn primary">保存外部访问</button><div id="sm"></div></form>';
+      }
+
       if (key === 'subscribe') {
         return '<form class="card" id="settings-form">' +
           '<div class="field"><label>订阅路径</label><input name="subscribe_path" value="' + esc(sub.subscribe_path || 's') + '"></div>' +
@@ -1689,6 +1777,7 @@
             checkbox('default_remind_traffic','默认流量提醒',sub.default_remind_traffic) + '</div>' +
           '<button class="btn primary">保存</button><div id="sm"></div></form>';
       }
+
       if (key === 'server') {
         return '<form class="card" id="settings-form">' +
           '<div class="field"><label>节点通信 Token</label><input name="server_token" value="' + esc(server.server_token || '') + '"></div>' +
@@ -1698,9 +1787,10 @@
             '<option value="0" ' + (Number(server.device_limit_mode)===0?'selected':'') + '>宽松</option>' +
             '<option value="1" ' + (Number(server.device_limit_mode)===1?'selected':'') + '>严格</option></select></div>' +
           checkbox('server_ws_enable','启用 WebSocket 节点同步',server.server_ws_enable) +
-          '<div class="field"><label>WebSocket 外部地址（留空自动）</label><input name="server_ws_url" value="' + esc(server.server_ws_url || '') + '"></div>' +
+          '<div class="muted" style="margin-bottom:12px">WebSocket 外部地址已经统一到“外部访问”标签。</div>' +
           '<button class="btn primary">保存</button><div id="sm"></div></form>';
       }
+
       if (key === 'safe') {
         return '<form class="card" id="settings-form">' +
           checkbox('safe_mode_enable','安全模式',safe.safe_mode_enable) +
@@ -1713,6 +1803,7 @@
           checkbox('password_limit_enable','启用密码错误限制',safe.password_limit_enable) +
           '<button class="btn primary">保存</button><div id="sm"></div></form>';
       }
+
       return '<form class="card" id="settings-form">' +
         '<div class="field"><label>Clash Meta 模板</label><textarea class="mono" rows="12" name="subscribe_template_clashmeta">' + esc(tpl.subscribe_template_clashmeta || '') + '</textarea></div>' +
         '<div class="field"><label>Sing-box 模板</label><textarea class="mono" rows="12" name="subscribe_template_singbox">' + esc(tpl.subscribe_template_singbox || '') + '</textarea></div>' +
@@ -1744,10 +1835,10 @@
         }
       };
     }
+
     c.querySelectorAll('[data-stab]').forEach(function(x){x.onclick=function(){show(x.dataset.stab);};});
     show('site');
   }
-
 
   function machineStatusInfo(m) {
     if (!m.is_active) return {text:'已停用', cls:'bad'};

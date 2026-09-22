@@ -18,8 +18,23 @@ class UserController extends Controller
     public function getActiveSession(Request $request)
     {
         $user = $request->user();
-        $authService = new AuthService($user);
-        return $this->success($authService->getSessions());
+        $currentTokenId = $user?->currentAccessToken()?->id;
+
+        $sessions = $user->tokens()
+            ->orderByDesc('last_used_at')
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn ($token) => [
+                'id' => $token->id,
+                'name' => $token->name,
+                'created_at' => $token->created_at,
+                'last_used_at' => $token->last_used_at,
+                'expires_at' => $token->expires_at,
+                'is_current' => (int) $token->id === (int) $currentTokenId,
+            ])
+            ->values();
+
+        return $this->success($sessions);
     }
 
     public function removeActiveSession(Request $request)
