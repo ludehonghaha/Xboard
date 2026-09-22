@@ -41,6 +41,42 @@
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 2600);
   };
+  async function copyText(value) {
+    const text = String(value ?? '');
+
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (_) {
+        // Fall through to the legacy copy path below.
+      }
+    }
+
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none';
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, area.value.length);
+
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch (_) {
+      copied = false;
+    } finally {
+      area.remove();
+    }
+
+    if (!copied) {
+      throw new Error('浏览器阻止自动复制，请手动选中命令复制');
+    }
+    return true;
+  }
+
   async function request(path, options = {}) {
     const headers = {'Accept':'application/json', ...(options.headers || {})};
     if (options.auth !== false && state.auth) headers.Authorization = state.auth;
@@ -249,7 +285,7 @@
     }
 
     c.querySelector('#copy-sub').onclick = async () => {
-      await navigator.clipboard.writeText(subUrl);
+      await copyText(subUrl);
       toast('已复制订阅地址');
     };
 
@@ -475,9 +511,9 @@
       ${(items||[]).map(m=>`<tr><td>${esc(m.name)}</td><td>${m.servers_count||0}</td><td><span class="badge ${m.is_active?'good':'bad'}">${m.is_active?'启用':'停用'}</span></td><td>${fmtDate(m.last_seen_at)}</td><td><button class="btn ghost small" data-install="${m.id}">安装命令</button></td></tr>`).join('')}
       </tbody></table></div>`;
     c.querySelector('#new-machine').onclick = () => modal('添加服务器','<form id="machine-form"><div class="field"><label>名称</label><input name="name" required></div><div class="field"><label>备注</label><input name="notes"></div><button class="btn primary">创建</button><div id="mm"></div></form>',(m,close)=>{
-      m.querySelector('#machine-form').onsubmit=async e=>{e.preventDefault();try{const data=await request(adminUrl('server/machine/save'),{method:'POST',body:{...Object.fromEntries(new FormData(e.currentTarget).entries()),is_active:true}});close();modal('安装命令',`<div class="codebox">${esc(data.install_command||'')}</div><div class="actions" style="margin-top:12px"><button class="btn primary" id="copy-cmd">复制</button></div>`,x=>x.querySelector('#copy-cmd').onclick=async()=>{await navigator.clipboard.writeText(data.install_command||'');toast('已复制')});renderMachines(c)}catch(err){m.querySelector('#mm').className='error';m.querySelector('#mm').textContent=err.message}};
+      m.querySelector('#machine-form').onsubmit=async e=>{e.preventDefault();try{const data=await request(adminUrl('server/machine/save'),{method:'POST',body:{...Object.fromEntries(new FormData(e.currentTarget).entries()),is_active:true}});close();modal('安装命令',`<div class="codebox">${esc(data.install_command||'')}</div><div class="actions" style="margin-top:12px"><button class="btn primary" id="copy-cmd">复制</button></div>`,x=>x.querySelector('#copy-cmd').onclick=async()=>{await copyText(data.install_command||'');toast('已复制')});renderMachines(c)}catch(err){m.querySelector('#mm').className='error';m.querySelector('#mm').textContent=err.message}};
     });
-    c.querySelectorAll('[data-install]').forEach(b=>b.onclick=async()=>{try{const d=await request(adminUrl('server/machine/installCommand?id='+encodeURIComponent(b.dataset.install)));modal('安装命令',`<div class="codebox">${esc(d.command||'')}</div><div class="actions" style="margin-top:12px"><button class="btn primary" id="copy-cmd">复制</button></div>`,m=>m.querySelector('#copy-cmd').onclick=async()=>{await navigator.clipboard.writeText(d.command||'');toast('已复制')})}catch(err){toast(err.message,false)}});
+    c.querySelectorAll('[data-install]').forEach(b=>b.onclick=async()=>{try{const d=await request(adminUrl('server/machine/installCommand?id='+encodeURIComponent(b.dataset.install)));modal('安装命令',`<div class="codebox">${esc(d.command||'')}</div><div class="actions" style="margin-top:12px"><button class="btn primary" id="copy-cmd">复制</button></div>`,m=>m.querySelector('#copy-cmd').onclick=async()=>{await copyText(d.command||'');toast('已复制')})}catch(err){toast(err.message,false)}});
   }
 
   async function renderNodes(c) {
@@ -526,7 +562,7 @@
       <div class="table-wrap"><table><thead><tr><th>邀请码</th><th>状态</th><th>创建时间</th><th></th></tr></thead><tbody>
       ${items.map(i=>`<tr><td class="mono">${esc(i.code)}</td><td><span class="badge ${Number(i.status)===0?'good':''}">${Number(i.status)===0?'未使用':'已使用'}</span></td><td>${fmtDate(i.created_at)}</td><td>${Number(i.status)===0?`<button class="btn danger small" data-drop-invite="${i.id}">删除</button>`:''}</td></tr>`).join('')}
       </tbody></table></div>`;
-    c.querySelector('#gen-invite').onclick=async()=>{try{const codes=await request(adminUrl('access-invite/generate'),{method:'POST',body:{count:Number(c.querySelector('#invite-count').value||1)}});modal('新邀请码',`<div class="codebox">${esc((codes||[]).join('\n'))}</div><div class="actions" style="margin-top:12px"><button class="btn primary" id="copy-inv">复制</button></div>`,m=>m.querySelector('#copy-inv').onclick=async()=>{await navigator.clipboard.writeText((codes||[]).join('\n'));toast('已复制')});renderInvites(c)}catch(err){toast(err.message,false)}};
+    c.querySelector('#gen-invite').onclick=async()=>{try{const codes=await request(adminUrl('access-invite/generate'),{method:'POST',body:{count:Number(c.querySelector('#invite-count').value||1)}});modal('新邀请码',`<div class="codebox">${esc((codes||[]).join('\n'))}</div><div class="actions" style="margin-top:12px"><button class="btn primary" id="copy-inv">复制</button></div>`,m=>m.querySelector('#copy-inv').onclick=async()=>{await copyText((codes||[]).join('\n'));toast('已复制')});renderInvites(c)}catch(err){toast(err.message,false)}};
     c.querySelectorAll('[data-drop-invite]').forEach(b=>b.onclick=async()=>{if(!confirm('删除这个未使用的邀请码？'))return;try{await request(adminUrl('access-invite/drop'),{method:'POST',body:{id:Number(b.dataset.dropInvite)}});renderInvites(c)}catch(err){toast(err.message,false)}});
   }
 
@@ -1982,7 +2018,7 @@
           '<div class="actions" style="margin-top:12px"><button class="btn primary" id="copy-agent-command">复制命令</button></div>',
           function(box) {
             box.querySelector('#copy-agent-command').onclick = async function() {
-              await navigator.clipboard.writeText(d.command || '');
+              await copyText(d.command || '');
               toast('安装命令已复制');
             };
           }
@@ -2064,7 +2100,7 @@
               '<div class="codebox" id="machine-token">' + esc(d.token || '') + '</div>' +
               '<div class="actions" style="margin-top:12px"><button class="btn ghost" id="copy-machine-token">复制</button><button class="btn danger" id="reset-machine-token">重置 Token</button></div>',
               function(tb) {
-                tb.querySelector('#copy-machine-token').onclick = async function(){await navigator.clipboard.writeText(d.token || '');toast('Token 已复制');};
+                tb.querySelector('#copy-machine-token').onclick = async function(){try{await copyText(d.token || '');toast('Token 已复制');}catch(err){toast(err.message || '复制失败，请手动复制',false);}};
                 tb.querySelector('#reset-machine-token').onclick = async function(){
                   if(!confirm('重置后旧 Agent Token 会立即失效，需要重新配置/安装 Agent。继续？')) return;
                   try {
