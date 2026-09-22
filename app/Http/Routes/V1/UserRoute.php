@@ -2,6 +2,7 @@
 namespace App\Http\Routes\V1;
 
 use App\Http\Controllers\V1\User\UserController;
+use App\Http\Controllers\V1\User\TelegramController;
 use Illuminate\Contracts\Routing\Registrar;
 
 class UserRoute
@@ -19,6 +20,7 @@ class UserRoute
             $router->get('/checkLogin', [UserController::class, 'checkLogin']);
             $router->get('/getActiveSession', [UserController::class, 'getActiveSession']);
             $router->post('/removeActiveSession', [UserController::class, 'removeActiveSession']);
+            $router->get('/telegram/getBotInfo', [TelegramController::class, 'getBotInfo']);
         });
     }
 }

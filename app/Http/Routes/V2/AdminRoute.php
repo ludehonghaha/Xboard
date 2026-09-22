@@ -9,6 +9,8 @@ use App\Http\Controllers\V2\Admin\Server\MachineController;
 use App\Http\Controllers\V2\Admin\Server\ManageController;
 use App\Http\Controllers\V2\Admin\Server\RouteController;
 use App\Http\Controllers\V2\Admin\StatController;
+use App\Http\Controllers\V2\Admin\SystemController;
+use App\Http\Controllers\V2\Admin\TrafficResetController;
 use App\Http\Controllers\V2\Admin\UserController;
 use Illuminate\Contracts\Routing\Registrar;
 
@@ -23,6 +25,7 @@ class AdminRoute
             $router->group(['prefix' => 'config'], function ($router) {
                 $router->get('/fetch', [ConfigController::class, 'fetch']);
                 $router->post('/save', [ConfigController::class, 'save']);
+                $router->post('/setTelegramWebhook', [ConfigController::class, 'setTelegramWebhook']);
             });
 
             $router->group(['prefix' => 'plan'], function ($router) {
@@ -83,6 +86,26 @@ class AdminRoute
             });
 
             $router->get('/stat/liteDashboard', [StatController::class, 'liteDashboard']);
+            $router->get('/stat/getStats', [StatController::class, 'getStats']);
+            $router->get('/stat/getServerLastRank', [StatController::class, 'getServerLastRank']);
+            $router->get('/stat/getServerYesterdayRank', [StatController::class, 'getServerYesterdayRank']);
+            $router->get('/stat/getTrafficRank', [StatController::class, 'getTrafficRank']);
+            $router->get('/stat/getStatRecord', [StatController::class, 'getStatRecord']);
+
+            $router->group(['prefix' => 'traffic-reset'], function ($router) {
+                $router->get('/logs', [TrafficResetController::class, 'logs']);
+                $router->get('/stats', [TrafficResetController::class, 'stats']);
+                $router->post('/reset-user', [TrafficResetController::class, 'resetUser']);
+                $router->get('/user/{userId}/history', [TrafficResetController::class, 'userHistory']);
+            });
+
+            $router->group(['prefix' => 'system'], function ($router) {
+                $router->get('/status', [SystemController::class, 'getSystemStatus']);
+                $router->get('/queue-stats', [SystemController::class, 'getQueueStats']);
+                $router->get('/queue-workload', [SystemController::class, 'getQueueWorkload']);
+                $router->get('/audit-log', [SystemController::class, 'getAuditLog']);
+                $router->get('/failed-jobs', [SystemController::class, 'getHorizonFailedJobs']);
+            });
 
             $router->group(['prefix' => 'access-invite'], function ($router) {
                 $router->get('/fetch', [AccessInviteController::class, 'fetch']);

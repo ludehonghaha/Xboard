@@ -138,8 +138,10 @@
       ['machines','服务器'],
       ['nodes','节点'],
       ['routes','路由'],
+      ['traffic','流量与统计'],
+      ['system','系统状态'],
       ['invites','邀请码'],
-      ['settings','基础设置'],
+      ['settings','系统设置'],
       ...basic,
     ];
   }
@@ -149,7 +151,7 @@
         <aside class="sidebar">
           <div class="brand">${esc(cfg.title || 'Xboard Lite')}</div>
           <nav class="nav">${navItems().map(([k,t])=>`<button data-page="${k}">${t}</button>`).join('')}</nav>
-          <div class="foot">Lite v2.4 · ${esc(cfg.version || '')}</div>
+          <div class="foot">Lite v3 preview · ${esc(cfg.version || '')}</div>
         </aside>
         <main class="main">
           <header class="topbar">
@@ -173,7 +175,8 @@
       const fn = {
         overview: renderOverview, subscription: renderSubscription, account: renderAccount,
         users: renderUsers, plans: renderPlans, machines: renderMachines,
-        nodes: renderNodes, routes: renderRoutes, invites: renderInvites, settings: renderSettings
+        nodes: renderNodes, routes: renderRoutes, traffic: renderTraffic,
+        system: renderSystem, invites: renderInvites, settings: renderSettings
       }[page] || renderSubscription;
       await fn(c);
     } catch (e) {
@@ -505,7 +508,7 @@
     const page = await request(adminUrl('user/fetch?current=1&pageSize=200'));
     const users = page.data || [];
     c.innerHTML = `
-      <div class="row"><h1 class="page-title">用户</h1><button class="btn primary small" id="new-user">新增用户</button></div>
+      <div class="row"><h1 class="page-title">用户</h1><div class="actions"><button class="btn ghost small" id="export-users">导出 CSV</button><button class="btn primary small" id="new-user">新增用户</button></div></div>
       <div class="toolbar"><input id="user-search" placeholder="搜索邮箱"><span class="muted">共 ${page.total||users.length} 个用户</span></div>
       <div class="table-wrap"><table><thead><tr><th>邮箱</th><th>套餐</th><th>流量</th><th>限速/设备</th><th>到期</th><th>状态</th><th></th></tr></thead><tbody id="users-body"></tbody></table></div>`;
     const tbody = c.querySelector('#users-body');
@@ -527,11 +530,31 @@
       }).join('');
       tbody.querySelectorAll('[data-edit-user]').forEach(b => b.onclick = () => editUser(users.find(x => Number(x.id)===Number(b.dataset.editUser)), c));
       tbody.querySelectorAll('[data-reset-user]').forEach(b => b.onclick = async()=>{if(!confirm('重置该用户订阅地址？旧地址会失效。'))return;try{await request(adminUrl('user/resetSecret'),{method:'POST',body:{id:Number(b.dataset.resetUser)}});toast('订阅地址已重置')}catch(e){toast(e.message,false)}});
-      tbody.querySelectorAll('[data-zero-user]').forEach(b => b.onclick = async()=>{const u=users.find(x=>Number(x.id)===Number(b.dataset.zeroUser));if(!confirm(`清零 ${u.email} 的已用流量？`))return;try{await request(adminUrl('user/update'),{method:'POST',body:{id:u.id,u:0,d:0}});toast('流量已清零');renderUsers(c)}catch(e){toast(e.message,false)}});
+      tbody.querySelectorAll('[data-zero-user]').forEach(b => b.onclick = async()=>{const u=users.find(x=>Number(x.id)===Number(b.dataset.zeroUser));if(!confirm(`清零 ${u.email} 的已用流量？本次操作会记录到流量重置历史。`))return;try{await request(adminUrl('traffic-reset/reset-user'),{method:'POST',body:{user_id:u.id,reason:'Lite v3 管理员手动清零'}});toast('流量已清零');renderUsers(c)}catch(e){toast(e.message,false)}});
       tbody.querySelectorAll('[data-drop-user]').forEach(b => b.onclick = async()=>{const u=users.find(x=>Number(x.id)===Number(b.dataset.dropUser));if(!confirm(`删除用户 ${u.email}？此操作不可撤销。`))return;try{await request(adminUrl('user/destroy'),{method:'POST',body:{id:u.id}});toast('用户已删除');renderUsers(c)}catch(e){toast(e.message,false)}});
     };
     paint();
     c.querySelector('#user-search').oninput = e => paint(e.target.value);
+    c.querySelector('#export-users').onclick = async () => {
+      try {
+        const res = await fetch(adminUrl('user/dumpCSV'), {
+          method:'POST',
+          headers:{'Accept':'text/csv','Content-Type':'application/json','Authorization':state.auth},
+          body:JSON.stringify({scope:'all'})
+        });
+        if(!res.ok) throw new Error('导出失败 ('+res.status+')');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'xboard-users-' + new Date().toISOString().slice(0,10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast('CSV 已导出');
+      } catch(err) { toast(err.message,false); }
+    };
     c.querySelector('#new-user').onclick = () => {
       modal('新增用户',`
         <form id="new-user-form">
@@ -1544,6 +1567,170 @@
       b.onclick = function(){openMachineEditor(items.find(function(m){return Number(m.id)===Number(b.dataset.machineEdit);}));};
     });
   }
+
+
+  async function renderTraffic(c) {
+    const safe = async (path) => {
+      try { return await request(path); }
+      catch (e) { return {__error:e.message}; }
+    };
+
+    const result = await Promise.all([
+      safe(adminUrl('stat/getStats')),
+      safe(adminUrl('stat/getTrafficRank?type=node')),
+      safe(adminUrl('stat/getTrafficRank?type=user')),
+      safe(adminUrl('traffic-reset/stats?days=30')),
+      safe(adminUrl('traffic-reset/logs?per_page=20&page=1'))
+    ]);
+
+    const statsWrap = result[0] || {};
+    const stats = statsWrap.data || statsWrap || {};
+    const nodeRank = (result[1] && result[1].data) || [];
+    const userRank = (result[2] && result[2].data) || [];
+    const resetStats = (result[3] && result[3].data) || {};
+    const resetLogs = (result[4] && result[4].data) || [];
+
+    const rankRows = (items) => (items || []).map((x, i) => `
+      <tr>
+        <td>${i+1}</td>
+        <td>${esc(x.name || x.id || '-')}</td>
+        <td>${fmtBytes(x.value || 0)}</td>
+        <td><span class="badge ${Number(x.change||0) >= 0 ? 'good' : 'bad'}">${Number(x.change||0) >= 0 ? '+' : ''}${Number(x.change||0).toFixed(1)}%</span></td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">暂无统计数据</td></tr>';
+
+    const logRows = (resetLogs || []).map(x => `
+      <tr>
+        <td>${esc(x.user_email || '-')}</td>
+        <td>${esc(x.reset_type_name || x.reset_type || '-')}</td>
+        <td>${esc(x.trigger_source_name || x.trigger_source || '-')}</td>
+        <td>${esc(x.old_traffic?.formatted || fmtBytes(x.old_traffic?.total || 0))}</td>
+        <td>${fmtDate(x.reset_time)}</td>
+      </tr>`).join('') || '<tr><td colspan="5" class="muted">暂无重置记录</td></tr>';
+
+    c.innerHTML = `
+      <div class="row">
+        <div>
+          <h1 class="page-title" style="margin-bottom:4px">流量与统计</h1>
+          <div class="muted">运营流量、在线情况、节点/用户排行和流量重置历史。</div>
+        </div>
+        <button class="btn ghost small" id="traffic-refresh">刷新</button>
+      </div>
+
+      <div class="grid cols4" style="margin-top:14px">
+        <div class="card metric"><div class="label">今日流量</div><div class="value">${fmtBytes(stats.todayTraffic?.total || 0)}</div><div class="muted">↑ ${fmtBytes(stats.todayTraffic?.upload || 0)} · ↓ ${fmtBytes(stats.todayTraffic?.download || 0)}</div></div>
+        <div class="card metric"><div class="label">本月流量</div><div class="value">${fmtBytes(stats.monthTraffic?.total || 0)}</div><div class="muted">累计 ${fmtBytes(stats.totalTraffic?.total || 0)}</div></div>
+        <div class="card metric"><div class="label">在线用户 / 设备</div><div class="value">${Number(stats.onlineUsers||0)} / ${Number(stats.onlineDevices||0)}</div><div class="muted">活跃用户 ${Number(stats.activeUsers||0)}</div></div>
+        <div class="card metric"><div class="label">在线节点</div><div class="value">${Number(stats.onlineNodes||0)}</div><div class="muted">本月新增用户 ${Number(stats.currentMonthNewUsers||0)}</div></div>
+      </div>
+
+      <div class="grid cols2" style="margin-top:14px">
+        <div class="card">
+          <div class="row"><b>节点流量排行 · 近 7 天</b><span class="muted">Top 10</span></div>
+          <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>#</th><th>节点</th><th>流量</th><th>环比</th></tr></thead><tbody>${rankRows(nodeRank)}</tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="row"><b>用户流量排行 · 近 7 天</b><span class="muted">Top 10</span></div>
+          <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>#</th><th>用户</th><th>流量</th><th>环比</th></tr></thead><tbody>${rankRows(userRank)}</tbody></table></div>
+        </div>
+      </div>
+
+      <div class="grid cols4" style="margin-top:14px">
+        <div class="card metric"><div class="label">30 天重置次数</div><div class="value">${Number(resetStats.total_resets||0)}</div></div>
+        <div class="card metric"><div class="label">自动重置</div><div class="value">${Number(resetStats.auto_resets||0)}</div></div>
+        <div class="card metric"><div class="label">手动重置</div><div class="value">${Number(resetStats.manual_resets||0)}</div></div>
+        <div class="card metric"><div class="label">Cron 重置</div><div class="value">${Number(resetStats.cron_resets||0)}</div></div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="row"><b>最近流量重置记录</b><span class="muted">${Number(result[4]?.pagination?.total || resetLogs.length)} 条</span></div>
+        <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>用户</th><th>类型</th><th>来源</th><th>重置前</th><th>时间</th></tr></thead><tbody>${logRows}</tbody></table></div>
+      </div>`;
+
+    c.querySelector('#traffic-refresh').onclick = () => renderTraffic(c);
+  }
+
+  async function renderSystem(c) {
+    const safe = async (path) => {
+      try { return await request(path); }
+      catch (e) { return {__error:e.message}; }
+    };
+
+    const result = await Promise.all([
+      safe(adminUrl('system/status')),
+      safe(adminUrl('system/queue-stats')),
+      safe(adminUrl('system/queue-workload')),
+      safe(adminUrl('system/audit-log?current=1&page_size=20')),
+      safe(adminUrl('system/failed-jobs?current=1&page_size=10'))
+    ]);
+
+    const status = result[0] || {};
+    const queue = result[1] || {};
+    const workload = Array.isArray(result[2]) ? result[2] : [];
+    const audit = result[3] || {};
+    const failed = result[4] || {};
+
+    const statusBadge = (ok, yes='正常', no='异常') =>
+      `<span class="badge ${ok ? 'good' : 'bad'}">${ok ? yes : no}</span>`;
+
+    const workloadRows = workload.map(x => `
+      <tr>
+        <td>${esc(x.name || '-')}</td>
+        <td>${Number(x.length || 0)}</td>
+        <td>${Number(x.processes || 0)}</td>
+        <td>${esc(x.wait || '0')}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">暂无队列负载数据</td></tr>';
+
+    const auditRows = (audit.data || []).map(x => `
+      <tr>
+        <td>${fmtDate(x.created_at)}</td>
+        <td>${esc(x.admin?.email || x.admin_id || '-')}</td>
+        <td>${esc(x.action || '-')}</td>
+        <td class="mono">${esc(x.method || '')} ${esc(x.uri || '')}</td>
+        <td>${esc(x.ip || '-')}</td>
+      </tr>`).join('') || '<tr><td colspan="5" class="muted">暂无审计记录</td></tr>';
+
+    const failedRows = (failed.data || []).map(x => `
+      <tr>
+        <td>${esc(x.name || x.queue || '-')}</td>
+        <td>${esc(x.queue || '-')}</td>
+        <td>${fmtDate(x.failed_at)}</td>
+      </tr>`).join('') || '<tr><td colspan="3" class="muted">暂无失败任务</td></tr>';
+
+    c.innerHTML = `
+      <div class="row">
+        <div>
+          <h1 class="page-title" style="margin-bottom:4px">系统状态</h1>
+          <div class="muted">只保留 Lite 需要的调度、队列、失败任务和管理员审计，不恢复完整 Horizon 后台。</div>
+        </div>
+        <button class="btn ghost small" id="system-refresh">刷新</button>
+      </div>
+
+      <div class="grid cols4" style="margin-top:14px">
+        <div class="card metric"><div class="label">计划任务</div><div class="value" style="font-size:16px">${statusBadge(!!status.schedule)}</div><div class="muted">最后检查 ${fmtDate(status.schedule_last_runtime)}</div></div>
+        <div class="card metric"><div class="label">Horizon</div><div class="value" style="font-size:16px">${statusBadge(!!status.horizon)}</div></div>
+        <div class="card metric"><div class="label">队列进程</div><div class="value">${Number(queue.processes||0)}</div><div class="muted">${Number(queue.jobsPerMinute||0).toFixed(1)} jobs/min</div></div>
+        <div class="card metric"><div class="label">最近失败任务</div><div class="value">${Number(queue.failedJobs||0)}</div><div class="muted">Recent jobs ${Number(queue.recentJobs||0)}</div></div>
+      </div>
+
+      <div class="grid cols2" style="margin-top:14px">
+        <div class="card">
+          <div class="row"><b>队列负载</b><span class="muted">${workload.length} 个队列</span></div>
+          <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>队列</th><th>等待任务</th><th>进程</th><th>等待</th></tr></thead><tbody>${workloadRows}</tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="row"><b>失败任务</b><span class="muted">${Number(failed.total||0)} 条</span></div>
+          <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>任务</th><th>队列</th><th>失败时间</th></tr></thead><tbody>${failedRows}</tbody></table></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="row"><b>管理员审计日志</b><span class="muted">${Number(audit.total||0)} 条</span></div>
+        <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>时间</th><th>管理员</th><th>动作</th><th>接口</th><th>IP</th></tr></thead><tbody>${auditRows}</tbody></table></div>
+      </div>`;
+
+    c.querySelector('#system-refresh').onclick = () => renderSystem(c);
+  }
+
 
   bootstrap();
 })();
