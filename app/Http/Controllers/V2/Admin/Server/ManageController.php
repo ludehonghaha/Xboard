@@ -596,6 +596,14 @@ class ManageController extends Controller
     }
 
     /**
+     * Generate Reality X25519 key pair and short id for visual node editing.
+     */
+    public function generateRealityKey(Request $request)
+    {
+        return $this->success($this->makeRealityKeys());
+    }
+
+    /**
      * Generate ECH (Encrypted Client Hello) key pair.
      * Returns PEM-encoded ECH key (server-side) and ECH config (client-side).
      */

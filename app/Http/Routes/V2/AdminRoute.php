@@ -58,6 +58,7 @@ class AdminRoute
                 $router->post('/batchDelete', [ManageController::class, 'batchDelete']);
                 $router->post('/batchUpdate', [ManageController::class, 'batchUpdate']);
                 $router->post('/batchResetTraffic', [ManageController::class, 'batchResetTraffic']);
+                $router->get('/generateRealityKey', [ManageController::class, 'generateRealityKey']);
                 $router->get('/generateEchKey', [ManageController::class, 'generateEchKey']);
                 $router->post('/quickDeploy', [ManageController::class, 'quickDeploy']);
             });

@@ -741,17 +741,243 @@
 
     c.innerHTML =
       '<div class="row"><h1 class="page-title">节点</h1><div class="actions"><button class="btn primary small" id="quick-deploy-node">一键部署协议</button><button class="btn ghost small" id="new-node">手工添加</button></div></div>' +
-      '<div class="muted" style="margin-bottom:12px">一键部署会自动生成端口与协议默认参数，并下发给绑定的 Machine Agent；Reality / ECH 等高级配置仍可手工编辑。</div>' +
+      '<div class="muted" style="margin-bottom:12px">一键部署会自动生成端口与协议默认参数；编辑节点已支持 TLS / Reality / ECH / WS / gRPC / XHTTP / uTLS / Multiplex 可视化设置。</div>' +
       '<div class="table-wrap"><table><thead><tr><th>名称</th><th>协议</th><th>地址</th><th>服务器</th><th>权限组</th><th>启用</th><th>展示</th><th></th></tr></thead><tbody>' +
       rows + '</tbody></table></div>';
 
     function openNode(n) {
       n = n || {};
-      const type = n.type || 'mieru';
-      const proto = n.id ? (n.protocol_settings || {}) : (v21ProtocolDefaults[type] || {});
+      const initialType = n.type || 'mieru';
+      let currentProto = JSON.parse(JSON.stringify(n.id ? (n.protocol_settings || {}) : (v21ProtocolDefaults[initialType] || {})));
+      let currentCert = JSON.parse(JSON.stringify(n.cert_config || {}));
+
+      function g(obj, path, fallback) {
+        const parts = path.split('.');
+        let cur = obj;
+        for (const p of parts) {
+          if (cur == null || typeof cur !== 'object' || !(p in cur)) return fallback;
+          cur = cur[p];
+        }
+        return cur == null ? fallback : cur;
+      }
+      function sel(name, value, options) {
+        return '<select name="' + name + '">' + options.map(function(o) {
+          return '<option value="' + esc(o[0]) + '" ' + (String(o[0]) === String(value) ? 'selected' : '') + '>' + esc(o[1]) + '</option>';
+        }).join('') + '</select>';
+      }
+      function inp(name, label, value, extra) {
+        return '<div class="field"><label>' + label + '</label><input name="' + name + '" value="' + esc(value == null ? '' : value) + '" ' + (extra || '') + '></div>';
+      }
+      function num(name, label, value, extra) {
+        return '<div class="field"><label>' + label + '</label><input type="number" name="' + name + '" value="' + esc(value == null ? '' : value) + '" ' + (extra || '') + '></div>';
+      }
+      function chk(name, label, value) {
+        return '<label class="field"><span>' + label + '</span><span><input type="checkbox" name="' + name + '" ' + (value ? 'checked' : '') + '> 启用</span></label>';
+      }
+      function ta(name, label, value, rows) {
+        return '<div class="field"><label>' + label + '</label><textarea class="mono" name="' + name + '" rows="' + (rows || 4) + '">' + esc(value || '') + '</textarea></div>';
+      }
+      function card(title, body, cls) {
+        return '<div class="card ' + (cls || '') + '" style="margin:12px 0"><b>' + title + '</b><div style="margin-top:10px">' + body + '</div></div>';
+      }
+
+      function tlsBody(tlsObj) {
+        tlsObj = tlsObj || {};
+        const ech = tlsObj.ech || {};
+        return [
+          '<div class="split">',
+          inp('v3_tls_sni','SNI / Server Name',tlsObj.server_name || ''),
+          chk('v3_tls_insecure','允许不安全证书',!!tlsObj.allow_insecure),
+          '</div>',
+          '<div class="split">',
+          chk('v3_ech_enabled','ECH',!!ech.enabled),
+          inp('v3_ech_query','ECH Query Server Name',ech.query_server_name || tlsObj.server_name || ''),
+          '</div>',
+          '<div class="actions"><button type="button" class="btn ghost small" id="v3-gen-ech">自动生成 ECH</button></div>',
+          ta('v3_ech_key','ECH KEYS（服务端）',ech.key || '',5),
+          ta('v3_ech_config','ECH CONFIGS（客户端）',ech.config || '',5)
+        ].join('');
+      }
+
+      function certBody(cert) {
+        cert = cert || {};
+        const mode = cert.cert_mode || 'none';
+        return [
+          '<div class="split">',
+          '<div class="field"><label>证书模式</label>' + sel('v3_cert_mode',mode,[
+            ['none','none · 不在 Agent 终止 TLS'],
+            ['self','self · 自动自签'],
+            ['http','http · ACME HTTP-01'],
+            ['dns','dns · ACME DNS-01'],
+            ['file','file · 使用服务器文件'],
+            ['content','content · 面板下发 PEM']
+          ]) + '</div>',
+          inp('v3_cert_domain','证书域名',cert.domain || ''),
+          '</div>',
+          '<div class="split">',
+          inp('v3_cert_email','ACME Email',cert.email || ''),
+          num('v3_cert_http_port','HTTP-01 端口',cert.http_port || 80,'min="1" max="65535"'),
+          '</div>',
+          '<div class="split">',
+          inp('v3_cert_file','证书文件路径',cert.cert_file || ''),
+          inp('v3_key_file','私钥文件路径',cert.key_file || ''),
+          '</div>',
+          '<div class="split">',
+          '<div class="field"><label>DNS Provider</label>' + sel('v3_dns_provider',cert.dns_provider || '',[['','未设置'],['cloudflare','Cloudflare'],['alidns','AliDNS']]) + '</div>',
+          ta('v3_dns_env','DNS API 环境变量 JSON',cert.dns_env ? JSON.stringify(cert.dns_env,null,2) : '',4),
+          '</div>',
+          ta('v3_cert_content','Certificate PEM',cert.cert_content || '',5),
+          ta('v3_key_content','Private Key PEM',cert.key_content || '',5)
+        ].join('');
+      }
+
+      function muxBody(p) {
+        const m = p.multiplex || {};
+        const b = m.brutal || {};
+        return [
+          '<div class="split">',
+          chk('v3_mux_enabled','Multiplex',!!m.enabled),
+          '<div class="field"><label>复用协议</label>' + sel('v3_mux_protocol',m.protocol || 'yamux',[['yamux','yamux'],['smux','smux'],['h2mux','h2mux']]) + '</div>',
+          '</div>',
+          '<div class="split">',
+          num('v3_mux_max_conn','最大连接数',m.max_connections || '','min="0"'),
+          chk('v3_mux_padding','Padding',!!m.padding),
+          '</div>',
+          '<div class="split">',
+          chk('v3_brutal_enabled','Brutal',!!b.enabled),
+          num('v3_brutal_up','Brutal 上行 Mbps',b.up_mbps || '','min="0"'),
+          '</div>',
+          num('v3_brutal_down','Brutal 下行 Mbps',b.down_mbps || '','min="0"')
+        ].join('');
+      }
+
+      function transportBody(p) {
+        const ns = p.network_settings || {};
+        return [
+          '<div class="field"><label>传输层</label>' + sel('v3_network',p.network || 'tcp',[
+            ['tcp','TCP'],['ws','WebSocket'],['grpc','gRPC'],['httpupgrade','HTTPUpgrade'],['http','HTTP/2'],['xhttp','XHTTP / SplitHTTP（自动切 Xray）']
+          ]) + '</div>',
+          '<div data-v3-net="ws httpupgrade http xhttp">',
+          '<div class="split">', inp('v3_net_path','Path',ns.path || '/'), inp('v3_net_host','Host',ns.host || ''), '</div>',
+          '</div>',
+          '<div data-v3-net="ws"><div class="split">',
+          num('v3_ws_early','WS Max Early Data',ns.max_early_data || '','min="0"'),
+          inp('v3_ws_early_header','WS Early Data Header',ns.early_data_header_name || 'Sec-WebSocket-Protocol'),
+          '</div></div>',
+          '<div data-v3-net="grpc">', inp('v3_grpc_service','gRPC Service Name',ns.service_name || ns.serviceName || ''), '</div>',
+          '<div data-v3-net="xhttp"><div class="split">',
+          '<div class="field"><label>XHTTP Mode</label>' + sel('v3_xhttp_mode',ns.mode || 'auto',[['auto','auto'],['packet-up','packet-up'],['stream-up','stream-up'],['stream-one','stream-one']]) + '</div>',
+          ta('v3_xhttp_extra','XHTTP Extra JSON',ns.extra ? JSON.stringify(ns.extra,null,2) : '',5),
+          '</div><div class="muted">XHTTP 会让 Machine Agent 为该节点自动选择 Xray 内核。</div></div>'
+        ].join('');
+      }
+
+      function visualHtml(type, p, cert) {
+        p = p || {};
+        const parts = [];
+
+        if (['vless','vmess','trojan'].includes(type)) {
+          let allowed = type === 'vless' ? [[0,'无'],[1,'TLS'],[2,'Reality']] :
+                        type === 'vmess' ? [[0,'无'],[1,'TLS']] :
+                        [[1,'TLS'],[2,'Reality']];
+          parts.push(card('安全与传输',
+            '<div class="split"><div class="field"><label>安全模式</label>' + sel('v3_tls_mode',p.tls == null ? (type==='trojan'?1:0) : p.tls,allowed) + '</div>' +
+            (type==='vless' ? '<div class="field"><label>Flow</label>' + sel('v3_vless_flow',p.flow || '',[['','无'],['xtls-rprx-vision','xtls-rprx-vision']]) + '</div>' : '') +
+            '</div>' + transportBody(p)
+          ));
+          parts.push('<div id="v3-tls-card">' + card('TLS',tlsBody(p.tls_settings || {})) + '</div>');
+          const r = p.reality_settings || {};
+          parts.push('<div id="v3-reality-card">' + card('Reality',[
+            '<div class="split">', inp('v3_reality_sni','目标站 / SNI',r.server_name || ''), num('v3_reality_port','目标端口',r.server_port || 443,'min="1" max="65535"'), '</div>',
+            '<div class="actions"><button type="button" class="btn ghost small" id="v3-gen-reality">自动生成 Reality 密钥</button></div>',
+            inp('v3_reality_public','Public Key',r.public_key || ''),
+            inp('v3_reality_private','Private Key',r.private_key || ''),
+            inp('v3_reality_short','Short ID',r.short_id || ''),
+            chk('v3_reality_insecure','Reality Allow Insecure',!!r.allow_insecure)
+          ].join('')) + '</div>');
+          const u = p.utls || {};
+          parts.push(card('uTLS + Multiplex',
+            '<div class="split">' + chk('v3_utls_enabled','uTLS',!!u.enabled) +
+            '<div class="field"><label>Fingerprint</label>' + sel('v3_utls_fp',u.fingerprint || 'chrome',[
+              ['chrome','chrome'],['firefox','firefox'],['safari','safari'],['ios','ios'],['android','android'],['edge','edge'],['random','random']
+            ]) + '</div></div>' + muxBody(p)
+          ));
+          if (type === 'vless') {
+            const e = p.encryption || {};
+            parts.push(card('VLESS Encryption',
+              '<div class="split">' + chk('v3_enc_enabled','启用 Encryption',!!e.enabled) +
+              inp('v3_enc_pub','客户端公钥 / encryption',e.encryption || '') + '</div>' +
+              inp('v3_enc_priv','服务端私钥 / decryption',e.decryption || '')
+            ));
+          }
+        } else if (type === 'hysteria') {
+          const ob = p.obfs || {}, bw = p.bandwidth || {};
+          parts.push(card('Hysteria2',
+            '<div class="split">' + num('v3_hy_version','版本',p.version || 2,'min="2" max="2"') +
+            num('v3_hy_hop','Hop Interval',p.hop_interval || '','min="0"') + '</div>' +
+            '<div class="split">' + num('v3_hy_up','带宽 Up Mbps',bw.up || '','min="0"') +
+            num('v3_hy_down','带宽 Down Mbps',bw.down || '','min="0"') + '</div>' +
+            '<div class="split">' + chk('v3_hy_obfs','Salamander Obfs',!!ob.open) +
+            inp('v3_hy_obfs_pass','Obfs Password',ob.password || '') + '</div>'
+          ));
+          parts.push(card('TLS',tlsBody(p.tls || {})));
+          parts.push(card('证书',certBody(cert)));
+        } else if (type === 'tuic') {
+          parts.push(card('TUIC',
+            '<div class="split">' + num('v3_tuic_version','版本',p.version || 5,'min="5" max="5"') +
+            '<div class="field"><label>拥塞控制</label>' + sel('v3_tuic_cc',p.congestion_control || 'cubic',[['cubic','cubic'],['bbr','bbr'],['new_reno','new_reno']]) + '</div></div>' +
+            '<div class="split">' + inp('v3_tuic_alpn','ALPN（逗号分隔）',Array.isArray(p.alpn)?p.alpn.join(','):'h3') +
+            '<div class="field"><label>UDP Relay</label>' + sel('v3_tuic_udp',p.udp_relay_mode || 'native',[['native','native'],['quic','quic']]) + '</div></div>'
+          ));
+          parts.push(card('TLS',tlsBody(p.tls || {})));
+          parts.push(card('证书',certBody(cert)));
+        } else if (type === 'anytls') {
+          parts.push(card('AnyTLS',
+            ta('v3_anytls_padding','Padding Scheme（每行一条）',Array.isArray(p.padding_scheme)?p.padding_scheme.join('\n'):'',8)
+          ));
+          parts.push(card('TLS',tlsBody(p.tls || {})));
+          parts.push(card('证书',certBody(cert)));
+        } else if (type === 'mieru') {
+          parts.push(card('Mieru',
+            '<div class="split"><div class="field"><label>Transport</label>' + sel('v3_mieru_transport',p.transport || 'TCP',[['TCP','TCP'],['UDP','UDP']]) + '</div>' +
+            inp('v3_mieru_pattern','Traffic Pattern',p.traffic_pattern || '') + '</div>' + muxBody(p)
+          ));
+        } else if (type === 'shadowsocks') {
+          const ob = p.obfs_settings || {};
+          parts.push(card('Shadowsocks',
+            '<div class="field"><label>Cipher</label>' + sel('v3_ss_cipher',p.cipher || '2022-blake3-aes-128-gcm',[
+              ['2022-blake3-aes-128-gcm','2022-blake3-aes-128-gcm'],
+              ['2022-blake3-aes-256-gcm','2022-blake3-aes-256-gcm'],
+              ['2022-blake3-chacha20-poly1305','2022-blake3-chacha20-poly1305'],
+              ['aes-128-gcm','aes-128-gcm'],['aes-256-gcm','aes-256-gcm'],['chacha20-ietf-poly1305','chacha20-ietf-poly1305']
+            ]) + '</div>' +
+            '<div class="split">' + inp('v3_ss_obfs','Obfs',p.obfs || '') + inp('v3_ss_plugin','Plugin',p.plugin || '') + '</div>' +
+            '<div class="split">' + inp('v3_ss_obfs_host','Obfs Host',ob.host || '') + inp('v3_ss_obfs_path','Obfs Path',ob.path || '') + '</div>' +
+            inp('v3_ss_plugin_opts','Plugin Options',p.plugin_opts || '')
+          ));
+        } else if (['socks','naive','http'].includes(type)) {
+          const tlsObj = p.tls_settings || {};
+          parts.push(card(type.toUpperCase(),
+            '<div class="field"><label>TLS</label>' + sel('v3_simple_tls',p.tls == null ? (type==='naive'?1:0) : p.tls,[[0,'关闭'],[1,'启用']]) + '</div>'
+          ));
+          parts.push('<div id="v3-simple-tls-card">' + card('TLS',tlsBody(tlsObj)) + '</div>');
+          parts.push('<div id="v3-simple-cert-card">' + card('证书',certBody(cert)) + '</div>');
+        }
+
+        if (['vless','vmess','trojan'].includes(type)) {
+          parts.push('<div id="v3-cert-card">' + card('证书',certBody(cert)) + '</div>');
+        }
+
+        parts.push('<details class="card" style="margin-top:12px"><summary><b>Raw JSON · 调试/兼容模式</b></summary>' +
+          '<div class="muted" style="margin:8px 0">可视化保存会保留这里的未知字段，再覆盖当前表单中已知字段。</div>' +
+          ta('v3_raw_json','protocol_settings',JSON.stringify(p || {},null,2),14) +
+          '</details>');
+        return parts.join('');
+      }
+
       let typeOptions = '';
       v21ProtocolTypes.forEach(function(t) {
-        typeOptions += '<option value="' + t + '" ' + (t === type ? 'selected' : '') + '>' + t + '</option>';
+        typeOptions += '<option value="' + t + '" ' + (t === initialType ? 'selected' : '') + '>' + t + '</option>';
       });
       let machineOptions = '<option value="">未绑定</option>';
       machines.forEach(function(m) {
@@ -759,21 +985,21 @@
       });
       const selectedGroups = (n.group_ids || []).map(Number);
       let groupChecks = '';
-      groups.forEach(function(g) {
-        groupChecks += '<label class="badge"><input type="checkbox" name="group_ids" value="' + g.id + '" ' +
-          (selectedGroups.includes(Number(g.id)) ? 'checked' : '') + '> ' + esc(g.name) + '</label>';
+      groups.forEach(function(gp) {
+        groupChecks += '<label class="badge"><input type="checkbox" name="group_ids" value="' + gp.id + '" ' +
+          (selectedGroups.includes(Number(gp.id)) ? 'checked' : '') + '> ' + esc(gp.name) + '</label>';
       });
       if (!groupChecks) groupChecks = '<span class="muted">暂无权限组</span>';
       const selectedRoutes = (n.route_ids || []).map(Number);
       let routeChecks = '';
-      routes.forEach(function(r) {
-        routeChecks += '<label class="badge"><input type="checkbox" name="route_ids" value="' + r.id + '" ' +
-          (selectedRoutes.includes(Number(r.id)) ? 'checked' : '') + '> ' + esc(r.remarks) + '</label>';
+      routes.forEach(function(rt) {
+        routeChecks += '<label class="badge"><input type="checkbox" name="route_ids" value="' + rt.id + '" ' +
+          (selectedRoutes.includes(Number(rt.id)) ? 'checked' : '') + '> ' + esc(rt.remarks) + '</label>';
       });
       if (!routeChecks) routeChecks = '<span class="muted">暂无路由</span>';
 
       const html =
-        '<form id="node-form">' +
+        '<form id="node-form-v3">' +
           '<div class="split">' +
             '<div class="field"><label>名称</label><input name="name" value="' + esc(n.name || '') + '" required></div>' +
             '<div class="field"><label>协议</label><select name="type" ' + (n.id ? 'disabled' : '') + '>' + typeOptions + '</select></div>' +
@@ -797,64 +1023,283 @@
             '<label class="field"><span>对用户展示</span><input type="checkbox" name="show" ' + ((n.id ? Number(n.show) : true) ? 'checked' : '') + '></label>' +
           '</div>' +
           '<div class="field"><label>标签（逗号分隔）</label><input name="tags" value="' + esc(Array.isArray(n.tags) ? n.tags.join(',') : (n.tags || '')) + '"></div>' +
-          '<div class="field"><label>协议高级 JSON</label><textarea name="protocol_settings" rows="14" class="mono">' + esc(v21Pretty(proto)) + '</textarea>' +
-            '<span class="muted">Reality / TLS / ECH / Multiplex / Mieru / Hysteria2 等参数都保留在这里。</span></div>' +
-          '<div class="actions"><button class="btn primary">保存节点</button><button type="button" class="btn ghost" id="proto-default">载入协议默认值</button></div>' +
-          '<div id="nm"></div>' +
+          '<div id="v3-protocol-editor">' + visualHtml(initialType,currentProto,currentCert) + '</div>' +
+          '<div class="actions"><button class="btn primary">保存节点</button><button type="button" class="btn ghost" id="v3-load-default">载入协议默认值</button></div>' +
+          '<div id="nm-v3"></div>' +
         '</form>';
 
-      modal(n.id ? '编辑节点' : '添加节点', html, function(box, close) {
-        const form = box.querySelector('#node-form');
-        function loadDefault() {
-          const t = form.querySelector('[name=type]').value;
-          form.querySelector('[name=protocol_settings]').value = v21Pretty(v21ProtocolDefaults[t] || {});
+      modal(n.id ? '编辑节点 · 可视化协议设置' : '添加节点 · 可视化协议设置', html, function(box, close) {
+        box.classList.add('wide');
+        const form = box.querySelector('#node-form-v3');
+        const editor = box.querySelector('#v3-protocol-editor');
+
+        function val(name) {
+          const el = form.querySelector('[name="' + name + '"]');
+          return el ? el.value : '';
         }
-        box.querySelector('#proto-default').onclick = loadDefault;
-        if (!n.id) form.querySelector('[name=type]').onchange = loadDefault;
+        function checked(name) {
+          const el = form.querySelector('[name="' + name + '"]');
+          return !!(el && el.checked);
+        }
+        function nullableNumber(name) {
+          const v = val(name);
+          return v === '' ? null : Number(v);
+        }
+        function safeJson(name, fallback) {
+          const v = val(name).trim();
+          if (!v) return fallback;
+          return JSON.parse(v);
+        }
+
+        function refreshVisibility() {
+          const network = val('v3_network');
+          form.querySelectorAll('[data-v3-net]').forEach(function(el) {
+            const allowed = String(el.dataset.v3Net || '').split(' ');
+            el.style.display = allowed.includes(network) ? '' : 'none';
+          });
+          const mode = Number(val('v3_tls_mode'));
+          const tls = box.querySelector('#v3-tls-card');
+          const reality = box.querySelector('#v3-reality-card');
+          const cert = box.querySelector('#v3-cert-card');
+          if (tls) tls.style.display = mode === 1 ? '' : 'none';
+          if (reality) reality.style.display = mode === 2 ? '' : 'none';
+          if (cert) cert.style.display = mode === 1 ? '' : 'none';
+
+          const simple = Number(val('v3_simple_tls'));
+          const stls = box.querySelector('#v3-simple-tls-card');
+          const scert = box.querySelector('#v3-simple-cert-card');
+          if (stls) stls.style.display = simple === 1 ? '' : 'none';
+          if (scert) scert.style.display = simple === 1 ? '' : 'none';
+        }
+
+        function bindEditorEvents() {
+          const net = form.querySelector('[name="v3_network"]');
+          const tls = form.querySelector('[name="v3_tls_mode"]');
+          const simple = form.querySelector('[name="v3_simple_tls"]');
+          if (net) net.onchange = refreshVisibility;
+          if (tls) tls.onchange = refreshVisibility;
+          if (simple) simple.onchange = refreshVisibility;
+
+          const genReality = box.querySelector('#v3-gen-reality');
+          if (genReality) genReality.onclick = async function() {
+            try {
+              const d = await request(adminUrl('server/manage/generateRealityKey'));
+              form.querySelector('[name="v3_reality_public"]').value = d.public_key || '';
+              form.querySelector('[name="v3_reality_private"]').value = d.private_key || '';
+              form.querySelector('[name="v3_reality_short"]').value = d.short_id || '';
+              toast('Reality 密钥已生成');
+            } catch (e) { toast(e.message,false); }
+          };
+
+          const genEch = box.querySelector('#v3-gen-ech');
+          if (genEch) genEch.onclick = async function() {
+            try {
+              const sni = val('v3_tls_sni') || 'ech.example.com';
+              const d = await request(adminUrl('server/manage/generateEchKey?public_name=' + encodeURIComponent(sni)));
+              form.querySelector('[name="v3_ech_enabled"]').checked = true;
+              form.querySelector('[name="v3_ech_query"]').value = sni;
+              form.querySelector('[name="v3_ech_key"]').value = d.key || '';
+              form.querySelector('[name="v3_ech_config"]').value = d.config || '';
+              toast('ECH 已生成');
+            } catch (e) { toast(e.message,false); }
+          };
+          refreshVisibility();
+        }
+
+        function renderEditor(type, proto, cert) {
+          editor.innerHTML = visualHtml(type,proto,cert);
+          bindEditorEvents();
+        }
+
+        function collectCert() {
+          const mode = val('v3_cert_mode');
+          if (!mode) return currentCert || {};
+          const out = Object.assign({}, currentCert || {}, {
+            cert_mode: mode,
+            domain: val('v3_cert_domain') || null,
+            email: val('v3_cert_email') || null,
+            http_port: nullableNumber('v3_cert_http_port') || 80,
+            cert_file: val('v3_cert_file') || null,
+            key_file: val('v3_key_file') || null,
+            dns_provider: val('v3_dns_provider') || null,
+            cert_content: val('v3_cert_content') || null,
+            key_content: val('v3_key_content') || null
+          });
+          try { out.dns_env = safeJson('v3_dns_env',{}); } catch(e) { throw new Error('DNS API 环境变量 JSON 格式错误'); }
+          return out;
+        }
+
+        function collectTLS(existing) {
+          existing = Object.assign({}, existing || {});
+          existing.server_name = val('v3_tls_sni') || null;
+          existing.allow_insecure = checked('v3_tls_insecure');
+          existing.ech = Object.assign({}, existing.ech || {}, {
+            enabled: checked('v3_ech_enabled'),
+            query_server_name: val('v3_ech_query') || null,
+            key: val('v3_ech_key') || null,
+            config: val('v3_ech_config') || null
+          });
+          return existing;
+        }
+
+        function collectMux(existing) {
+          const m = Object.assign({}, existing || {});
+          m.enabled = checked('v3_mux_enabled');
+          m.protocol = val('v3_mux_protocol') || 'yamux';
+          m.max_connections = nullableNumber('v3_mux_max_conn');
+          m.padding = checked('v3_mux_padding');
+          m.brutal = Object.assign({}, m.brutal || {}, {
+            enabled: checked('v3_brutal_enabled'),
+            up_mbps: nullableNumber('v3_brutal_up'),
+            down_mbps: nullableNumber('v3_brutal_down')
+          });
+          return m;
+        }
+
+        function collectProtocol(type) {
+          let p = {};
+          try { p = safeJson('v3_raw_json',{}); }
+          catch(e) { throw new Error('Raw JSON 格式错误'); }
+
+          if (['vless','vmess','trojan'].includes(type)) {
+            p.tls = Number(val('v3_tls_mode') || 0);
+            p.network = val('v3_network') || 'tcp';
+            const ns = Object.assign({},p.network_settings || {});
+            if (['ws','httpupgrade','http','xhttp'].includes(p.network)) {
+              ns.path = val('v3_net_path') || '/';
+              ns.host = val('v3_net_host') || null;
+            }
+            if (p.network === 'ws') {
+              ns.max_early_data = nullableNumber('v3_ws_early');
+              ns.early_data_header_name = val('v3_ws_early_header') || null;
+            }
+            if (p.network === 'grpc') ns.service_name = val('v3_grpc_service') || '';
+            if (p.network === 'xhttp') {
+              ns.mode = val('v3_xhttp_mode') || 'auto';
+              try { ns.extra = safeJson('v3_xhttp_extra',{}); }
+              catch(e) { throw new Error('XHTTP Extra JSON 格式错误'); }
+            }
+            p.network_settings = ns;
+            if (p.tls === 1) p.tls_settings = collectTLS(p.tls_settings);
+            if (p.tls === 2) {
+              p.reality_settings = Object.assign({},p.reality_settings || {},{
+                server_name:val('v3_reality_sni') || null,
+                server_port:nullableNumber('v3_reality_port') || 443,
+                public_key:val('v3_reality_public') || null,
+                private_key:val('v3_reality_private') || null,
+                short_id:val('v3_reality_short') || null,
+                allow_insecure:checked('v3_reality_insecure')
+              });
+            }
+            p.utls = Object.assign({},p.utls || {},{
+              enabled:checked('v3_utls_enabled'),
+              fingerprint:val('v3_utls_fp') || 'chrome'
+            });
+            p.multiplex = collectMux(p.multiplex);
+            if (type === 'vless') {
+              p.flow = val('v3_vless_flow') || null;
+              p.encryption = Object.assign({},p.encryption || {},{
+                enabled:checked('v3_enc_enabled'),
+                encryption:val('v3_enc_pub') || null,
+                decryption:val('v3_enc_priv') || null
+              });
+            }
+          } else if (type === 'hysteria') {
+            p.version = Number(val('v3_hy_version') || 2);
+            p.hop_interval = nullableNumber('v3_hy_hop');
+            p.bandwidth = {up:nullableNumber('v3_hy_up'),down:nullableNumber('v3_hy_down')};
+            p.obfs = {open:checked('v3_hy_obfs'),type:'salamander',password:val('v3_hy_obfs_pass') || null};
+            p.tls = collectTLS(p.tls);
+          } else if (type === 'tuic') {
+            p.version = Number(val('v3_tuic_version') || 5);
+            p.congestion_control = val('v3_tuic_cc') || 'cubic';
+            p.alpn = String(val('v3_tuic_alpn') || 'h3').split(',').map(function(x){return x.trim();}).filter(Boolean);
+            p.udp_relay_mode = val('v3_tuic_udp') || 'native';
+            p.tls = collectTLS(p.tls);
+          } else if (type === 'anytls') {
+            p.padding_scheme = String(val('v3_anytls_padding') || '').split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean);
+            p.tls = collectTLS(p.tls);
+          } else if (type === 'mieru') {
+            p.transport = val('v3_mieru_transport') || 'TCP';
+            p.traffic_pattern = val('v3_mieru_pattern') || '';
+            p.multiplex = collectMux(p.multiplex);
+          } else if (type === 'shadowsocks') {
+            p.cipher = val('v3_ss_cipher');
+            p.obfs = val('v3_ss_obfs') || null;
+            p.obfs_settings = {host:val('v3_ss_obfs_host') || null,path:val('v3_ss_obfs_path') || null};
+            p.plugin = val('v3_ss_plugin') || null;
+            p.plugin_opts = val('v3_ss_plugin_opts') || null;
+          } else if (['socks','naive','http'].includes(type)) {
+            p.tls = Number(val('v3_simple_tls') || 0);
+            if (p.tls === 1) p.tls_settings = collectTLS(p.tls_settings);
+          }
+          return p;
+        }
+
+        box.querySelector('#v3-load-default').onclick = function() {
+          const t = form.querySelector('[name="type"]').value;
+          currentProto = JSON.parse(JSON.stringify(v21ProtocolDefaults[t] || {}));
+          currentCert = {};
+          renderEditor(t,currentProto,currentCert);
+          toast('已载入协议默认值');
+        };
+        if (!n.id) {
+          form.querySelector('[name="type"]').onchange = function() {
+            const t = this.value;
+            currentProto = JSON.parse(JSON.stringify(v21ProtocolDefaults[t] || {}));
+            currentCert = {};
+            renderEditor(t,currentProto,currentCert);
+          };
+        }
+        bindEditorEvents();
 
         form.onsubmit = async function(e) {
           e.preventDefault();
           const fd = new FormData(form);
-          const msg = box.querySelector('#nm');
-          let settings;
+          const msg = box.querySelector('#nm-v3');
+          const type = n.id ? n.type : fd.get('type');
+          let settings, cert;
           try {
-            settings = JSON.parse(fd.get('protocol_settings') || '{}');
-          } catch (_) {
+            settings = collectProtocol(type);
+            cert = collectCert();
+          } catch(err) {
             msg.className = 'error';
-            msg.textContent = '协议高级 JSON 格式错误';
+            msg.textContent = err.message;
             return;
           }
-          const groupIds = Array.from(form.querySelectorAll('[name=group_ids]:checked')).map(function(x) { return Number(x.value); });
-          const routeIds = Array.from(form.querySelectorAll('[name=route_ids]:checked')).map(function(x) { return Number(x.value); });
+          const groupIds = Array.from(form.querySelectorAll('[name=group_ids]:checked')).map(function(x){return Number(x.value);});
+          const routeIds = Array.from(form.querySelectorAll('[name=route_ids]:checked')).map(function(x){return Number(x.value);});
           const body = {
-            id: n.id || null,
-            type: n.id ? n.type : fd.get('type'),
-            name: fd.get('name'),
-            host: fd.get('host'),
-            port: fd.get('port'),
-            server_port: fd.get('server_port'),
-            rate: Number(fd.get('rate') || 1),
-            machine_id: fd.get('machine_id') ? Number(fd.get('machine_id')) : null,
-            group_ids: groupIds,
-            route_ids: routeIds,
-            enabled: fd.get('enabled') === 'on',
-            show: fd.get('show') === 'on' ? 1 : 0,
-            tags: String(fd.get('tags') || '').split(',').map(function(x) { return x.trim(); }).filter(Boolean),
-            transfer_enable: Math.round(Number(fd.get('transfer_gb') || 0) * GB),
-            protocol_settings: settings
+            id:n.id || null,
+            type:type,
+            name:fd.get('name'),
+            host:fd.get('host'),
+            port:fd.get('port'),
+            server_port:fd.get('server_port'),
+            rate:Number(fd.get('rate') || 1),
+            machine_id:fd.get('machine_id') ? Number(fd.get('machine_id')) : null,
+            group_ids:groupIds,
+            route_ids:routeIds,
+            enabled:fd.get('enabled') === 'on',
+            show:fd.get('show') === 'on' ? 1 : 0,
+            tags:String(fd.get('tags') || '').split(',').map(function(x){return x.trim();}).filter(Boolean),
+            transfer_enable:Math.round(Number(fd.get('transfer_gb') || 0) * GB),
+            protocol_settings:settings,
+            cert_config:cert
           };
           try {
-            await request(adminUrl('server/manage/save'), {method:'POST', body:body});
-            toast('节点已保存');
+            await request(adminUrl('server/manage/save'),{method:'POST',body:body});
+            toast('节点已保存并同步');
             close();
             renderNodes(c);
-          } catch (err) {
+          } catch(err) {
             msg.className = 'error';
             msg.textContent = err.message;
           }
         };
       });
     }
+
 
     function openQuickDeploy() {
       const usableMachines = machines.filter(function(m) { return m.is_active; });

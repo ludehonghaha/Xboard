@@ -117,7 +117,7 @@ v3 不再按“页面少”删除业务能力，而是合并信息架构。
 - [x] 完成后端/路由初步功能盘点
 - [x] 用户确认 REVIEW 模块去留
 - [x] 恢复第一批核心后端操作：统计、流量重置、系统状态、Telegram
-- [ ] 高级节点参数从 JSON 改为可视化分组
+- [x] 高级节点参数从 JSON 改为可视化分组：TLS / Reality / ECH / WS / gRPC / XHTTP / uTLS / Multiplex / 证书模式
 - [x] 增加“流量与统计”
 - [x] 增加轻量“系统状态”
 - [ ] 整理设置 URL 模型（Panel / Subscribe / WS）
